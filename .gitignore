@@ -1,0 +1,19 @@
+# Environment variables
+.env
+
+# Python bytecode & caches
+__pycache__/
+*.py[cod]
+
+# Virtualenv folders
+venv/
+env/
+ENV/
+
+# VS Code workspace settings
+.vscode/
+
+# Windows system files
+Thumbs.db
+ehthumbs.db
+Desktop.ini

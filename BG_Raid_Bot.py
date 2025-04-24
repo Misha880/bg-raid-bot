@@ -2,6 +2,7 @@ import discord
 from discord import Interaction
 from discord.ui import Select, View, Button, Modal, TextInput
 from discord.ext import commands
+from discord.utils import escape_markdown
 import pytz
 from datetime import datetime, timedelta
 import re
@@ -892,7 +893,7 @@ async def showsignups(interaction: discord.Interaction):
                 role = mapping["roles"][emoji]
                 names = sorted(
                     [
-                        member.display_name
+                        escape_markdown(member.display_name)
                         for uid in role_signups.get(role, ())
                         if (member := guild.get_member(uid)) is not None
                     ],
@@ -903,7 +904,7 @@ async def showsignups(interaction: discord.Interaction):
         output.append("\n__**Backups**__")
         backup_names = sorted(
             [
-                member.display_name
+                escape_markdown(member.display_name)
                 for uid in backup_ids
                 if (member := guild.get_member(uid)) is not None
             ],

@@ -1,16 +1,17 @@
 import discord
 from discord import Interaction
-from discord.ui import Select, View, Button, Modal, TextInput
 from discord.ext import commands
+from discord.ui import Button, Modal, Select, TextInput, View
 from discord.utils import escape_markdown
+import aiosqlite
 import pytz
-from datetime import datetime, timedelta
-import re
-import os
 import asyncio
 import logging
-import aiosqlite
-from typing import Dict, Set
+import os
+import re
+from datetime import datetime, timedelta
+from functools import wraps
+from typing import Dict, List, Optional, Set, Tuple
 
 # Setup logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -18,6 +19,11 @@ logger = logging.getLogger(__name__)
 
 # Constants and configuration
 TOKEN = os.getenv("DISCORD_TOKEN")
+if not TOKEN:
+    logger.critical("DISCORD_TOKEN is not set; aborting startup.")
+    import sys
+    sys.exit(1)
+
 GUILD_LEADER_ROLE_ID = 1064772891180290080
 RAID_CAPTAIN_ROLE_ID = 1227986507260891216
 GUILD_MEMBER_PING = f"<@&1058291622439292958>"
@@ -44,14 +50,30 @@ _TIME_PATTERNS = [
      lambda g: f"{g[0]}:00"),
 ]
 
+# Role-based permission check
+def permission_check(func):
+    @wraps(func)
+    async def wrapper(interaction: Interaction, *args, **kwargs):
+        if not any(r.id in (GUILD_LEADER_ROLE_ID, RAID_CAPTAIN_ROLE_ID)
+                   for r in interaction.user.roles):
+            return await interaction.response.send_message(
+                "You do not have permission to use this command.",
+                ephemeral=True
+            )
+        return await func(interaction, *args, **kwargs)
+    return wrapper
+
 # Database manager using aiosqlite
 class DBManager:
     EXPECTED_COLUMNS = {
-        "raid_id": "INTEGER PRIMARY KEY",
-        "raid_name": "TEXT",
-        "channel_id": "INTEGER",
-        "raid_type": "TEXT",
-        "ping_timestamp": "INTEGER",
+        "raid_id":         "INTEGER PRIMARY KEY",
+        "raid_name":       "TEXT",
+        "channel_id":      "INTEGER",
+        "raid_type":       "TEXT",
+        "start_timestamp": "INTEGER",
+        "ping_timestamp":  "INTEGER",
+        "duration":        "TEXT",
+        "tz":              "TEXT",
     }
 
     def __init__(self, db_path: str):
@@ -386,9 +408,7 @@ class RaidBot(commands.Bot):
 
             # Send the reminder
             await channel.send(
-                f"{GUILD_MEMBER_PING} Raid starts in 30 minutes! Please join the raid VC, "
-                "head to the guild house, and submit your deck to your team lead."
-            )
+                f"{GUILD_MEMBER_PING} Raid starts in 30 minutes! Please join the raid VC, head to the guild house, and submit your deck to your team lead.")
 
             # Purge in‑memory signups cache
             signups_cache.pop(raid_id, None)
@@ -451,43 +471,47 @@ async def validate_time_input(time_str: str) -> datetime.time:
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    # Look up raid in memory
-    raid_info = active_raids.get(payload.message_id)
-    if not raid_info:
-        return
+    try:
+        # Look up raid in memory
+        raid_info = active_raids.get(payload.message_id)
+        if not raid_info:
+            return
 
-    guild = bot.get_guild(payload.guild_id) or await bot.fetch_guild(payload.guild_id)
-    member = payload.member or guild.get_member(payload.user_id) or await guild.fetch_member(payload.user_id)
-    if member.bot:
-        return
+        guild = bot.get_guild(payload.guild_id) or await bot.fetch_guild(payload.guild_id)
+        member = payload.member or guild.get_member(payload.user_id) or await guild.fetch_member(payload.user_id)
+        if member.bot:
+            return
 
-    emoji = str(payload.emoji)
+        emoji = str(payload.emoji)
+        raid_type = raid_info["raid_type"]
 
-    # Pull raid_type from memory
-    raid_type = raid_info["raid_type"]
+        # Build allowed reactions set
+        allowed = set(RAID_REACTIONS.get(raid_type, []))
+        allowed.add(SIGNUP_MAPPINGS[raid_type]["backup"])
 
-    # Build allowed reactions set
-    allowed = set(RAID_REACTIONS.get(raid_type, []))
-    allowed.add(SIGNUP_MAPPINGS[raid_type]["backup"])
+        # Strip any unauthorized emoji
+        if emoji not in allowed:
+            channel = bot.get_channel(payload.channel_id) or await bot.fetch_channel(payload.channel_id)
+            msg = await channel.fetch_message(payload.message_id)
+            await msg.remove_reaction(payload.emoji, member)
+            return
 
-    # Strip any unauthorized emoji
-    if emoji not in allowed:
-        channel = bot.get_channel(payload.channel_id) or await bot.fetch_channel(payload.channel_id)
-        msg = await channel.fetch_message(payload.message_id)
-        await msg.remove_reaction(payload.emoji, member)
-        return
+        # Store user ID in cache
+        cache = signups_cache.setdefault(payload.message_id, {})
+        cache.setdefault(emoji, set()).add(payload.user_id)
 
-    # Store user ID in cache
-    cache = signups_cache.setdefault(payload.message_id, {})
-    cache.setdefault(emoji, set()).add(payload.user_id)
+    except Exception:
+        logger.exception("Error in on_raw_reaction_add")
 
 @bot.event
 async def on_raw_reaction_remove(payload):
-    # keep cache in-sync on un‑react
-    if payload.message_id in active_raids:
-        cache = signups_cache.get(payload.message_id, {})
-        # Discard by user_id
-        cache.get(str(payload.emoji), set()).discard(payload.user_id)
+    try:
+        # Keep cache in-sync on un-react
+        if payload.message_id in active_raids:
+            cache = signups_cache.get(payload.message_id, {})
+            cache.get(str(payload.emoji), set()).discard(payload.user_id)
+    except Exception:
+        logger.exception("Error in on_raw_reaction_remove")
 
 class CreateRaidFlow:
     def __init__(self, raid_name: str = None):
@@ -535,6 +559,8 @@ class TimeButton(Button):
         modal = TimeModal(self.view.flow)
         await interaction.response.send_modal(modal)
         await modal.wait()
+        if not self.view.flow.start_time_str:
+            return
 
         try:
             # Validate time input
@@ -565,9 +591,10 @@ class TimeButton(Button):
                 )
             )
 
-            # Schedule reminder ping
-            ping_time = utc_dt - timedelta(minutes=30)
-            delay = (ping_time - datetime.now(pytz.utc)).total_seconds()
+            # Compute and store both start and ping timestamps and schedule reminder ping
+            start_timestamp = int(utc_dt.timestamp())
+            ping_timestamp = start_timestamp - 30 * 60  # 30 minutes before
+            delay = (datetime.fromtimestamp(ping_timestamp, tz=pytz.utc) - datetime.now(pytz.utc)).total_seconds()
             
             if delay > 0:
                 task = asyncio.create_task(
@@ -580,8 +607,18 @@ class TimeButton(Button):
                     "channel_id": interaction.channel.id
                 }
                 await db.execute(
-                    "INSERT INTO active_raids (raid_id, raid_name, channel_id, raid_type, ping_timestamp) VALUES (?, ?, ?, ?, ?)",
-                    (post.id, raid_name, interaction.channel.id, self.view.flow.raid_type, int(ping_time.timestamp()))
+                    "INSERT INTO active_raids (raid_id, raid_name, channel_id, raid_type, start_timestamp, ping_timestamp, duration, tz) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        post.id,
+                        raid_name,
+                        interaction.channel.id,
+                        self.view.flow.raid_type,
+                        start_timestamp,
+                        ping_timestamp,
+                        self.view.flow.duration,
+                        self.view.flow.tz,
+                    )
                 )
 
             # Disable view after successful raid creation
@@ -596,94 +633,47 @@ class TimeButton(Button):
             logger.error(f"Raid creation error: {e}", exc_info=True)
             await interaction.followup.send(str(e), ephemeral=True)
 
-class CreateRaidView(View):
-    def __init__(self, flow: CreateRaidFlow):
-        super().__init__(timeout=300)
-        self.flow = flow
-        
-        # Add dropdown components
-        self.add_item(RaidTypeSelect(row=0))
-        self.add_item(DurationSelect(row=1))
-        self.add_item(DateSelect(row=2))
-        self.add_item(TimezoneSelect(row=3))
-        
-        # Add time button (initially disabled)
-        self.time_button = TimeButton(row=4)
-        self.add_item(self.time_button)
-
-    def all_required_filled(self):
-        return all([
-            self.flow.raid_type,
-            self.flow.duration,
-            self.flow.date,
-            self.flow.tz
-        ])
-
-    async def update_view(self, interaction: Interaction):
-        """Update button state and refresh view"""
-        self.time_button.disabled = not self.all_required_filled()
-        await interaction.response.edit_message(view=self)
-
-class RaidTypeSelect(Select):
-    def __init__(self, row: int):
+class RaidSelect(Select):
+    def __init__(self, raids: List[Tuple[int, str]], placeholder: str = "Select raid…"):
         options = [
-            discord.SelectOption(label=name, value=name)
-            for name in RAID_TEMPLATES
+            discord.SelectOption(label=name, value=str(r_id))
+            for r_id, name in raids
         ]
-        super().__init__(placeholder="Select Raid Type…", row=row, options=options)
+        super().__init__(placeholder=placeholder, options=options)
+        self.selected_raid: int = None
 
     async def callback(self, interaction: Interaction):
-        choice = self.values[0]
-        self.view.flow.raid_type = choice
+        self.selected_raid = int(self.values[0])
+        await interaction.response.defer(ephemeral=True)
+        await interaction.edit_original_response(view=None)
+        self.view.stop()
 
-        # mark the chosen option
-        for opt in self.options:
-            opt.default = (opt.value == choice)
-
-        # enable/disable the Time button
-        self.view.time_button.disabled = not self.view.all_required_filled()
-
-        # re‑send the updated view so the selection sticks
-        await interaction.response.edit_message(view=self.view)
-
-class DurationSelect(Select):
-    def __init__(self, row: int):
-        durations = ["3 hours", "1.5 hours"]
-        options = [
-            discord.SelectOption(label=d, value=d)
-            for d in durations
-        ]
-        super().__init__(placeholder="Select Duration…", row=row, options=options)
+class FlowSelect(Select):
+    """Generic select for CreateRaidFlow fields."""
+    def __init__(
+        self,
+        name: str,
+        options: List[discord.SelectOption],
+        *,
+        row: int,
+        placeholder: str
+    ):
+        super().__init__(placeholder=placeholder, row=row, options=options)
+        self.name = name  # Name of the flow attribute to set
 
     async def callback(self, interaction: Interaction):
-        choice = self.values[0]
-        self.view.flow.duration = choice
+        # Persist the selected value in flow
+        selected = self.values[0]
+        setattr(self.view.flow, self.name, selected)
 
+        # Mark this option as selected
         for opt in self.options:
-            opt.default = (opt.value == choice)
+            opt.default = (opt.value == selected)
 
+        # Enable time‐entry button when all fields are set
         self.view.time_button.disabled = not self.view.all_required_filled()
-        await interaction.response.edit_message(view=self.view)
 
-class DateSelect(Select):
-    def __init__(self, row: int):
-        today = datetime.now()
-        options = []
-        for i in range(14):
-            day = today + timedelta(days=i)
-            label = day.strftime("%A, %B %d")
-            value = day.strftime("%Y-%m-%d")
-            options.append(discord.SelectOption(label=label, value=value))
-        super().__init__(placeholder="Select Date…", row=row, options=options)
-
-    async def callback(self, interaction: Interaction):
-        choice = self.values[0]
-        self.view.flow.date = choice
-
-        for opt in self.options:
-            opt.default = (opt.value == choice)
-
-        self.view.time_button.disabled = not self.view.all_required_filled()
+        # Rerender view so selection sticks
         await interaction.response.edit_message(view=self.view)
 
 class TimezoneSelect(Select):
@@ -717,20 +707,76 @@ class TimezoneSelect(Select):
         self.view.time_button.disabled = not self.view.all_required_filled()
         await interaction.response.edit_message(view=self.view)
 
+class CreateRaidView(View):
+    """View containing dropdowns for raid configuration and a submit button."""
+    def __init__(self, flow: CreateRaidFlow):
+        super().__init__(timeout=300)
+        self.flow = flow
+
+        # Raid type dropdown
+        raid_type_options = [
+            discord.SelectOption(label=rt, value=rt)
+            for rt in RAID_TEMPLATES
+        ]
+        self.add_item(FlowSelect(
+            name="raid_type",
+            options=raid_type_options,
+            row=0,
+            placeholder="Select raid type"
+        ))
+
+        # Duration dropdown
+        duration_options = [
+            discord.SelectOption(label=d, value=d)
+            for d in ("3 hours", "1.5 hours")
+        ]
+        self.add_item(FlowSelect(
+            name="duration",
+            options=duration_options,
+            row=1,
+            placeholder="Select duration"
+        ))
+
+        # Date dropdown (next 14 days)
+        today = datetime.now()
+        date_options = [
+            discord.SelectOption(
+                label=(today + timedelta(days=i)).strftime("%A, %B %d"),
+                value=(today + timedelta(days=i)).strftime("%Y-%m-%d")
+            )
+            for i in range(14)
+        ]
+        self.add_item(FlowSelect(
+            name="date",
+            options=date_options,
+            row=2,
+            placeholder="Select date"
+        ))
+
+        # Timezone dropdown (use your global TimezoneSelect here)
+        self.add_item(TimezoneSelect(row=3))
+
+        # Button to open time modal; starts disabled until all selects are filled
+        self.time_button = TimeButton(row=4)
+        self.time_button.disabled = True
+        self.add_item(self.time_button)
+
+    def all_required_filled(self) -> bool:
+        """Return True when all flow attributes have been set."""
+        return all([
+            self.flow.raid_type,
+            self.flow.duration,
+            self.flow.date,
+            self.flow.tz
+        ])
+
 # /createraid command
+@permission_check
 @bot.tree.command(name="createraid", description="Create a new raid")
 async def create_raid(
     interaction: Interaction,
     raid_name: str
 ):
-    # Permission check
-    if not any(r.id in (GUILD_LEADER_ROLE_ID, RAID_CAPTAIN_ROLE_ID) 
-               for r in interaction.user.roles):
-        return await interaction.response.send_message(
-            "You do not have permission to use this command.",
-            ephemeral=True
-        )
-
     # Initialize creation flow
     flow = CreateRaidFlow(raid_name=raid_name)
     view = CreateRaidView(flow)
@@ -742,189 +788,338 @@ async def create_raid(
         ephemeral=True
     )
 
-# /cancelraid command
-@bot.tree.command(name="cancelraid", description="Cancel an active raid")
-async def cancel_raid(interaction: discord.Interaction):
-    if not any(role.id in [GUILD_LEADER_ROLE_ID, RAID_CAPTAIN_ROLE_ID] for role in interaction.user.roles):
-        await interaction.response.send_message("You do not have permission to use this command.", ephemeral=True)
-        return
+class UpdateButton(Button):
+    """Opens time modal and marks form submission."""
+    def __init__(self, row: int):
+        super().__init__(
+            style=discord.ButtonStyle.primary,
+            label="Enter Time & Update",
+            row=row,
+            disabled=True
+        )
+
+    async def callback(self, interaction: Interaction):
+        # Prevent action until all dropdowns are set
+        if not self.view.all_required_filled():
+            await interaction.response.send_message(
+                "Please complete all fields first.",
+                ephemeral=True
+            )
+            return
+
+        # Launch time-entry modal
+        modal = TimeModal(self.view.flow)
+        await interaction.response.send_modal(modal)
+        await modal.wait()
+
+        # Abort if user did not enter a time
+        if not self.view.flow.start_time_str:
+            return
+
+        # Mark that the form was submitted and end the view
+        self.view.submitted = True
+        self.view.stop()
+
+
+class UpdateRaidView(CreateRaidView):
+    def __init__(self, flow: CreateRaidFlow):
+        super().__init__(flow)
+
+        # Remove the raid-type dropdown (we don’t want it on updates)
+        for child in list(self.children):
+            if isinstance(child, FlowSelect) and child.name == "raid_type":
+                self.remove_item(child)
+
+        # Prefill each dropdown with the stored value
+        for child in self.children:
+            if isinstance(child, FlowSelect):
+                current = getattr(flow, child.name)
+                for opt in child.options:
+                    opt.default = (opt.value == current)
+            elif isinstance(child, TimezoneSelect):
+                for opt in child.options:
+                    opt.default = (opt.value == flow.tz)
+
+        # Swap in the “update” button
+        self.remove_item(self.time_button)
+        self.time_button = UpdateButton(row=4)
+        self.time_button.disabled = not self.all_required_filled()
+        self.add_item(self.time_button)
+
+        self.submitted = False
+
+    async def on_timeout(self):
+        # Disable all controls and reflect timeout in the view
+        for comp in self.children:
+            comp.disabled = True
+        try:
+            await self.message.edit(view=self)
+        except Exception as e:
+            logger.warning(f"UpdateRaidView timeout disable failed: {e}")
+
+async def fetch_signup_post(channel_id: int, message_id: int) -> Optional[discord.Message]:
+    try:
+        channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+        return await channel.fetch_message(message_id)
+    except discord.NotFound:
+        logger.info(f"Sign-up post {message_id} not found in channel {channel_id}")
+        return None
+    except Exception as exc:
+        logger.error(f"Unexpected error fetching sign-up post {message_id}: {exc}", exc_info=True)
+        return None
+
+async def edit_signup_post(
+    signup_post: discord.Message,
+    new_content: str,
+    raid_id: int,
+    interaction: discord.Interaction
+) -> None:
+    try:
+        await signup_post.edit(content=new_content)
+        logger.info(f"Sign-up post {raid_id} edited successfully")
+    except discord.HTTPException as exc:
+        logger.error(f"Failed to edit sign-up post {raid_id}: {exc}", exc_info=True)
+        # Let the user know the DB was updated but the post wasn’t editable
+        await interaction.followup.send(
+            "Updated in the database, but I couldn’t edit the sign-up post. Check my permissions?",
+            ephemeral=True
+        )
+
+# /updateraid command
+@permission_check
+@bot.tree.command(name="updateraid", description="Update or reschedule an active raid")
+async def update_raid(interaction: Interaction):
     await interaction.response.defer(ephemeral=True)
 
+    # Fetch all active raids
+    rows = await db.fetchall(
+        "SELECT raid_id, raid_name, channel_id, raid_type, start_timestamp, duration, tz "
+        "FROM active_raids"
+    )
+    if not rows:
+        return await interaction.followup.send("There are no active raids.", ephemeral=True)
+
+    # Prompt user to select which raid to update
+    selector_view = View(timeout=60)
+    selector_view.add_item(RaidSelect(
+        raids=[(r[0], r[1]) for r in rows],
+        placeholder="Select raid to update…"
+    ))
+    await interaction.followup.send("Choose a raid to update:", view=selector_view, ephemeral=True)
+    await selector_view.wait()
+
+    raid_id = selector_view.children[0].selected_raid
+    if raid_id is None:
+        return  # user timed out or cancelled
+
+    # Load selected raid's settings
+    (_, raid_name, channel_id, raid_type, start_ts, duration, tz_code) = \
+        next(r for r in rows if r[0] == raid_id)
+
+    # Convert stored UTC timestamp into user's local time
+    user_tz = pytz.timezone(TIMEZONE_MAPPING[tz_code])
+    local_dt = datetime.fromtimestamp(start_ts, pytz.utc).astimezone(user_tz)
+
+    # Prepare flow with existing values
+    flow = CreateRaidFlow(raid_name=raid_name)
+    flow.raid_type      = raid_type
+    flow.duration       = duration
+    flow.date           = local_dt.strftime("%Y-%m-%d")
+    flow.tz             = tz_code
+    flow.start_time_str = local_dt.strftime("%I:%M%p")
+
+    # Display pre-filled update form
+    update_view = UpdateRaidView(flow)
+    await interaction.followup.send("**Update raid details**", view=update_view, ephemeral=True)
+    await update_view.wait()
+    if not update_view.submitted:
+        return  # user closed without submitting
+
+    # Parse new date/time into a UTC timestamp
+    new_time = await validate_time_input(flow.start_time_str)
+    new_date = datetime.strptime(flow.date, "%Y-%m-%d").date()
+    combined = datetime.combine(new_date, new_time)
+    localized = user_tz.localize(combined, is_dst=None)
+    new_utc   = localized.astimezone(pytz.utc)
+    new_start = int(new_utc.timestamp())
+    new_ping  = new_start - 30 * 60  # thirty minutes before start
+
+    # Attempt to fetch and edit the original sign-up post
+    signup_post = await fetch_signup_post(channel_id, raid_id)
+    if signup_post:
+        ts_tag = f"<t:{new_start}:F>"
+        new_content = RAID_TEMPLATES[flow.raid_type].format(
+            name=raid_name,
+            duration=flow.duration,
+            timestamp=ts_tag,
+            GUILD_MEMBER_PING=GUILD_MEMBER_PING
+        )
+        await edit_signup_post(signup_post, new_content, raid_id)
+
+    # Persist updated schedule to the database
+    await db.execute(
+        "UPDATE active_raids "
+        "SET start_timestamp = ?, ping_timestamp = ?, duration = ?, tz = ? "
+        "WHERE raid_id = ?",
+        (new_start, new_ping, flow.duration, flow.tz, raid_id)
+    )
+
+    # Cancel existing reminder and schedule a new one
+    old = active_raids.pop(raid_id, None)
+    if old and old.get("ping_task"):
+        old["ping_task"].cancel()
+
+    # Ensure we have a channel object for scheduling
+    channel = signup_post.channel if signup_post else (
+        bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+    )
+    delay = (datetime.fromtimestamp(new_ping, pytz.utc) - datetime.now(pytz.utc)).total_seconds()
+    if delay > 0:
+        task = asyncio.create_task(bot.schedule_ping(delay, channel, raid_id))
+        active_raids[raid_id] = {
+            "ping_task": task,
+            "name":      raid_name,
+            "raid_type": flow.raid_type,
+            "channel_id": channel_id
+        }
+    else:
+        # If the warning window has already passed, remove its record
+        await db.execute("DELETE FROM active_raids WHERE raid_id = ?", (raid_id,))
+
+    await interaction.followup.send("Raid updated successfully.", ephemeral=True)
+
+# /cancelraid command
+@permission_check
+@bot.tree.command(name="cancelraid", description="Cancel an active raid")
+async def cancel_raid(interaction: Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    # Load active raids
     raids = await db.fetchall("""
         SELECT raid_id, raid_name
         FROM active_raids
         ORDER BY raid_id DESC
     """)
     if not raids:
-        await interaction.followup.send("There are no active raids.", ephemeral=True)
-        return
+        return await interaction.followup.send("There are no active raids.", ephemeral=True)
 
-    class CancelSelect(Select):
-        def __init__(self):
-            options = [
-                discord.SelectOption(label=name, value=str(r_id))
-                for r_id, name in raids
-        ]
-            super().__init__(placeholder="Select raid to cancel...", options=options)
-        async def callback(self, interaction: discord.Interaction):
-            self.view.selected_raid = int(self.values[0])
-            await interaction.response.defer()
-            await interaction.edit_original_response(view=None)
-            self.view.stop()
-
+    # Show dropdown
     view = View(timeout=60)
-    view.add_item(CancelSelect())
-    view.selected_raid = None
+    view.add_item(RaidSelect(raids, placeholder="Select raid to cancel…"))
     await interaction.followup.send("Select a raid to cancel:", view=view, ephemeral=True)
     await view.wait()
-    if not view.selected_raid:
+
+    # Which one did they pick?
+    selector: RaidSelect = view.children[0]  # our single item
+    raid_id = selector.selected_raid
+    if raid_id is None:
         return
 
-    raid_id = view.selected_raid
-    result = await db.fetchone("SELECT channel_id FROM active_raids WHERE raid_id = ?", (raid_id,))
-    channel_id = int(result[0]) if result else None
+    # Get channel_id before deleting from DB
+    row = await db.fetchone(
+        "SELECT channel_id FROM active_raids WHERE raid_id = ?",
+        (raid_id,)
+    )
+    channel_id = int(row[0]) if row else None
 
-    try:
-        # Cancel scheduled ping task if present
-        raid_info = active_raids.get(raid_id)
-        if raid_info and raid_info.get("ping_task"):
-            raid_info["ping_task"].cancel()
+    # Cancel in‐memory task & caches
+    info = active_raids.pop(raid_id, None)
+    if info and info.get("ping_task"):
+        info["ping_task"].cancel()
+        try:
+            await info["ping_task"]
+        except asyncio.CancelledError:
+            pass
+    signups_cache.pop(raid_id, None)
 
-        # Remove from our in-memory caches
-        signups_cache.pop(raid_id, None)
-        active_raids.pop(raid_id, None)
+    # Delete from database
+    await db.execute("DELETE FROM active_raids WHERE raid_id = ?", (raid_id,))
 
-        # Delete from database
-        await db.execute("DELETE FROM active_raids WHERE raid_id = ?", (raid_id,))
+    # Try to delete the original announcement
+    if channel_id:
+        try:
+            channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+            msg = await channel.fetch_message(raid_id)
+            await msg.delete()
+        except discord.NotFound:
+            logger.warning(f"Message {raid_id} already deleted")
+        except Exception as e:
+            logger.error(f"Error deleting message: {e}")
 
-        # Delete the original message
-        if channel_id:
-            channel = bot.get_channel(channel_id)
-            if channel:
-                try:
-                    msg = await channel.fetch_message(raid_id)
-                    await msg.delete()
-                except discord.NotFound:
-                    logger.warning(f"Message {raid_id} already deleted")
-                except Exception as e:
-                    logger.error(f"Error deleting message: {e}")
-
-        await interaction.followup.send("Raid successfully canceled.", ephemeral=True)
-    except Exception as e:
-        logger.error(f"Error cancelling raid: {e}")
-        await interaction.followup.send("Failed to cancel raid.", ephemeral=True)
+    await interaction.followup.send("Raid successfully canceled.", ephemeral=True)
 
 # /showsignups command
+@permission_check
 @bot.tree.command(name="showsignups", description="Show sign-ups for an active raid")
-async def showsignups(interaction: discord.Interaction):
-    if not any(role.id in [GUILD_LEADER_ROLE_ID, RAID_CAPTAIN_ROLE_ID]
-               for role in interaction.user.roles):
-        await interaction.response.send_message(
-            "You do not have permission to use this command.",
-            ephemeral=True
-        )
+async def showsignups(interaction: Interaction):
+    await interaction.response.defer(ephemeral=True)
+    logger.info(f"Sign-ups check by {interaction.user.display_name}")
+
+    # Load active raids
+    raids = await db.fetchall("""
+        SELECT raid_id, raid_name, channel_id, raid_type
+        FROM active_raids
+        ORDER BY raid_id DESC
+    """)
+    if not raids:
+        return await interaction.followup.send("There are no active raids.", ephemeral=True)
+
+    # Show dropdown
+    options = [(r_id, name) for r_id, name, _, _ in raids]
+    view = View(timeout=30)
+    view.add_item(RaidSelect(options, placeholder="Select raid to view sign-ups…"))
+    await interaction.followup.send("Select a raid to view sign-ups:", view=view, ephemeral=True)
+    await view.wait()
+
+    selector: RaidSelect = view.children[0]
+    raid_id = selector.selected_raid
+    if raid_id is None:
         return
 
-    await interaction.response.defer(ephemeral=True)
-    logger.info(f"Signups check by {interaction.user.display_name}")
+    # Extract chosen raid metadata
+    _, raid_name, _, raid_type = next(r for r in raids if r[0] == raid_id)
+    mapping = SIGNUP_MAPPINGS[raid_type]
 
-    try:
-        # Load active raids
-        raids = await db.fetchall("""
-            SELECT raid_id, raid_name, channel_id, raid_type
-            FROM active_raids
-            ORDER BY raid_id DESC
-        """)
-        if not raids:
-            await interaction.followup.send("No active raids", ephemeral=True)
-            return
+    # Build sign-up cache
+    cache = signups_cache.get(raid_id, {})
+    guild = interaction.guild or await bot.fetch_guild(interaction.guild_id)
 
-        # Raid selection
-        class RaidSelect(Select):
-            def __init__(self):
-                options = [
-                    discord.SelectOption(label=name, value=str(r_id))
-                    for r_id, name, _, _ in raids
-                ]
-                super().__init__(
-                    placeholder="Select raid to view sign-ups...",
-                    options=options
-                )
+    # Per-role lists
+    role_signups = {
+        mapping["roles"][emoji]: cache.get(emoji, set())
+        for emoji in mapping["roles"]
+    }
+    backup_ids = cache.get(mapping["backup"], set())
+    all_ids = set().union(*role_signups.values(), backup_ids)
 
-            async def callback(self, interaction: discord.Interaction):
-                self.view.selected_raid = int(self.values[0])
-                await interaction.response.defer(ephemeral=True)
-                await interaction.edit_original_response(view=None)
-                self.view.stop()
+    # Assemble output
+    lines: List[str] = [f"**{raid_name}**\n\n__**Roles**__"]
+    for emoji in RAID_REACTIONS[raid_type]:
+        if emoji in mapping["roles"]:
+            role_desc = mapping["roles"][emoji]
+            names = sorted(
+                (
+                    escape_markdown(member.display_name)
+                    for uid in role_signups[role_desc]
+                    if (member := guild.get_member(uid))
+                ),
+                key=str.lower
+            )
+            lines.append(f"{emoji} {role_desc}:** {', '.join(names) or 'None'}")
 
-        view = View(timeout=30)
-        view.add_item(RaidSelect())
-        await interaction.followup.send(
-            "Select a raid to view sign-ups:",
-            view=view,
-            ephemeral=True
-        )
-        await view.wait()
-        if not getattr(view, "selected_raid", None):
-            return
+    lines.append("\n__**Backups**__")
+    backup_names = sorted(
+        (
+            escape_markdown(member.display_name)
+            for uid in backup_ids
+            if (member := guild.get_member(uid))
+        ),
+        key=str.lower
+    )
+    lines.append(f"{mapping['backup']} {', '.join(backup_names) or 'None'}")
+    lines.append(f"\n**Number of Sign-ups:** {len(all_ids)}")
 
-        # Extract raid details
-        raid_id, raid_name, _,raid_type = next(
-            r for r in raids if r[0] == view.selected_raid
-        )
-        mapping = SIGNUP_MAPPINGS[raid_type]
-
-        # Build cache and localize guild
-        cache = signups_cache.get(raid_id, {})
-        guild = interaction.guild or await bot.fetch_guild(interaction.guild_id)
-
-        # Build per-role lists
-        role_signups = {
-            role_desc: cache.get(emoji, set())
-            for emoji, role_desc in mapping["roles"].items()
-        }
-
-        # Backups (IDs)
-        backup_ids = cache.get(mapping["backup"], set())
-
-        # Unique Sign‑ups
-        all_ids = set().union(*role_signups.values(), backup_ids)
-
-        # Format output, resolving IDs → display_name
-        output = [f"**{raid_name}**\n\n__**Roles**__"]
-        for emoji in RAID_REACTIONS[raid_type]:
-            if emoji in mapping["roles"]:
-                role = mapping["roles"][emoji]
-                names = sorted(
-                    [
-                        escape_markdown(member.display_name)
-                        for uid in role_signups.get(role, ())
-                        if (member := guild.get_member(uid)) is not None
-                    ],
-                    key=str.lower
-                )
-                output.append(f"{emoji} {role}:** {', '.join(names) or 'None'}")
-
-        output.append("\n__**Backups**__")
-        backup_names = sorted(
-            [
-                escape_markdown(member.display_name)
-                for uid in backup_ids
-                if (member := guild.get_member(uid)) is not None
-            ],
-            key=str.lower
-        )
-        output.append(f"{mapping['backup']} {', '.join(backup_names) or 'None'}")
-        output.append(f"\n**Number of Sign‑ups:** {len(all_ids)}")
-
-        await interaction.followup.send("\n".join(output), ephemeral=True)
-
-    except Exception as e:
-        logger.error("Sign‑ups error:", exc_info=True)
-        await interaction.followup.send(
-            "Error generating sign‑ups list",
-            ephemeral=True
-        )
+    await interaction.followup.send("\n".join(lines), ephemeral=True)
 
 if __name__ == "__main__":
     bot.run(TOKEN)

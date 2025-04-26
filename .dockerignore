@@ -1,5 +1,12 @@
+# Environment variables
 .env
+
+# Local Docker Compose configuration
 docker-compose.yml
+
+# Git metadata directory
 .git
+
+# Python bytecode & caches
 __pycache__/
 *.pyc

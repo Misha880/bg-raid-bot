@@ -41,15 +41,39 @@ class TimeButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         view = self.view
+        # ensure all dropdowns are filled before proceeding
         if not view.all_required_filled():
             return await interaction.response.send_message(
                 "Please complete all dropdown selections first.",
                 ephemeral=True
             )
+
+        # prompt user for exact time
         modal = TimeModal(view.flow)
         await interaction.response.send_modal(modal)
         await modal.wait()
-        # post-creation logic handled in bot
+
+        # validate the submitted time string
+        try:
+            user_time = await validate_time_input(view.flow.start_time_str)
+        except ValueError as e:
+            return await interaction.followup.send(str(e), ephemeral=True)
+
+        # combine selected date and time, then convert to UTC
+        date_obj = datetime.strptime(view.flow.date, "%Y-%m-%d").date()
+        local_dt = datetime.combine(date_obj, user_time)
+        tz = pytz.timezone(TIMEZONE_MAPPING[view.flow.tz])
+        localized_dt = tz.localize(local_dt, is_dst=None)
+        start_ts = int(localized_dt.astimezone(pytz.utc).timestamp())
+        ping_ts = start_ts - 30 * 60
+
+        # attach timestamps to flow for the command handler
+        view.flow._start_ts = start_ts
+        view.flow._ping_ts = ping_ts
+        view.submitted = True
+
+        # signal that input is complete
+        view.stop()
 
 class FlowSelect(Select):
     def __init__(self, name: str, options: list[discord.SelectOption], row: int, placeholder: str):

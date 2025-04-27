@@ -145,37 +145,38 @@ async def on_ready():
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    try:
-        # Look up raid in memory
-        raid_info = active_raids.get(payload.message_id)
-        if not raid_info:
-            return
+    # log raw reaction event for debugging
+    logger.debug(f"raw_reaction_add: message_id={payload.message_id} emoji={payload.emoji} user_id={payload.user_id}")
 
-        guild = bot.get_guild(payload.guild_id) or await bot.fetch_guild(payload.guild_id)
-        member = payload.member or guild.get_member(payload.user_id) or await guild.fetch_member(payload.user_id)
-        if member.bot:
-            return
+    # ignore reactions on messages we’re not tracking
+    raid_info = active_raids.get(payload.message_id)
+    if not raid_info:
+        return
 
-        emoji = str(payload.emoji)
-        raid_type = raid_info["raid_type"]
+    # obtain member object to allow removal
+    guild = bot.get_guild(payload.guild_id) or await bot.fetch_guild(payload.guild_id)
+    member = payload.member or guild.get_member(payload.user_id) or await guild.fetch_member(payload.user_id)
+    if member.bot:
+        return
 
-        # Build allowed reactions set
-        allowed = set(RAID_REACTIONS.get(raid_type, []))
-        allowed.add(SIGNUP_MAPPINGS[raid_type]["backup"])
+    emoji = str(payload.emoji)
+    raid_type = raid_info["raid_type"]
 
-        # Strip any unauthorized emoji
-        if emoji not in allowed:
-            channel = bot.get_channel(payload.channel_id) or await bot.fetch_channel(payload.channel_id)
-            msg = await channel.fetch_message(payload.message_id)
-            await msg.remove_reaction(payload.emoji, member)
-            return
+    # assemble the set of permitted emojis
+    allowed = set(RAID_REACTIONS.get(raid_type, []))
+    allowed.add(SIGNUP_MAPPINGS[raid_type]["backup"])
 
-        # Store user ID in cache
-        cache = signups_cache.setdefault(payload.message_id, {})
-        cache.setdefault(emoji, set()).add(payload.user_id)
+    # remove any reaction not in the permitted list
+    if emoji not in allowed:
+        channel = bot.get_channel(payload.channel_id) or await bot.fetch_channel(payload.channel_id)
+        message = await channel.fetch_message(payload.message_id)
+        logger.info(f"Removing unauthorized reaction {emoji} from user {member.display_name}")
+        await message.remove_reaction(payload.emoji, member)
+        return
 
-    except Exception:
-        logger.exception("Error in on_raw_reaction_add")
+    # record valid reaction in cache
+    cache = signups_cache.setdefault(payload.message_id, {})
+    cache.setdefault(emoji, set()).add(payload.user_id)
 
 @bot.event
 async def on_raw_reaction_remove(payload):
@@ -205,20 +206,64 @@ class RaidSelect(Select):
 # /createraid command
 @permission_check
 @bot.tree.command(name="createraid", description="Create a new raid")
-async def create_raid(
-    interaction: Interaction,
-    raid_name: str
-):
-    # Initialize creation flow
+async def create_raid(interaction: Interaction, raid_name: str):
     flow = CreateRaidFlow(raid_name=raid_name)
     view = CreateRaidView(flow)
 
-    # Send initial configuration message
+    # send the modal-based configuration flow
     await interaction.response.send_message(
-        "**Raid Configuration**\n",
+        "**Raid Configuration**\n"
+        "Select type, date, duration, timezone, then enter a time.",
         view=view,
         ephemeral=True
     )
+
+    # wait for the user to submit or timeout
+    await view.wait()
+    if not view.submitted:
+        return  # user cancelled or view timed out
+
+    # render the signup announcement
+    ts_tag = f"<t:{flow._start_ts}:F>"
+    content = RAID_TEMPLATES[flow.raid_type].format(
+        name=flow.raid_name,
+        timestamp=ts_tag,
+        duration=flow.duration,
+        GUILD_MEMBER_PING=GUILD_MEMBER_PING
+    )
+    channel = interaction.channel
+    signup_msg = await channel.send(content)
+
+    # add all reaction emojis for sign-ups
+    for emoji in RAID_REACTIONS[flow.raid_type]:
+        await signup_msg.add_reaction(emoji)
+
+    # persist raid metadata for reminders and restarts
+    await db.execute(
+        "INSERT INTO active_raids "
+        "(raid_id, raid_name, channel_id, start_timestamp, ping_timestamp, duration, tz) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            signup_msg.id,
+            flow.raid_name,
+            channel.id,
+            flow.raid_type,
+            flow._start_ts,
+            flow._ping_ts,
+            flow.duration,
+            flow.tz
+            )
+    )
+
+    # schedule the 30-minute warning task
+    delay = flow._ping_ts - int(datetime.now(pytz.utc).timestamp())
+    ping_task = asyncio.create_task(bot.schedule_ping(delay, channel, signup_msg.id))
+    active_raids[signup_msg.id] = {
+        "ping_task": ping_task,
+        "name": flow.raid_name,
+        "raid_type": flow.raid_type,
+        "channel_id": channel.id
+    }
 
 # /updateraid command
 @permission_check

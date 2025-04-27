@@ -11,36 +11,35 @@ TIMEZONE_MAPPING = {
     "UTC": "UTC"
 }
 
-# Raid templates and reaction mapping
 RAID_TEMPLATES = {
     "Cabal's Revenge Raid": """**{name}**
 
 **Date & Time:** {timestamp}
 **Duration:** {duration}
 
-⭐  = Vanguard Team
-🌞  = Outside Combat Team
-🌕  = Mob Pulling/Cannon Team
+⭐ = Vanguard Team
+🌞 = Outside Combat Team
+🌕 = Mob Pulling/Cannon Team
 
 🔴 **NORTH-WEST | RED BANNER** 🔴
-⭐  Daemon Vanguard: **-yth/Fire/Storm 2** -- 1️⃣
-🌞  OS Combat Team 1: **-yth 1 Oblongata** -- 2️⃣
-🌕  West Cannon Mob Puller: **Any School Hitter** -- 3️⃣
+⭐ Daemon Vanguard: **-yth/Fire/Storm 2** -- 1️⃣
+🌞 OS Combat Team 1: **-yth 1 Oblongata** -- 2️⃣
+🌕 West Cannon Mob Puller: **Any School Hitter** -- 3️⃣
 
 🟢 **NORTH-EAST | GREEN BANNER** 🟢
-⭐  Cabalist Vanguard: **Support 1 (No Zap/No Monu)** -- 4️⃣
-🌞  OS Combat Team 1: **-yth 2 Oblongata** -- 5️⃣
-🌕  East Cannon Mob Puller: **Any School Hitter** -- 6️⃣
+⭐ Cabalist Vanguard: **Support 1 (No Zap/No Monu)** -- 4️⃣
+🌞 OS Combat Team 1: **-yth 2 Oblongata** -- 5️⃣
+🌕 East Cannon Mob Puller: **Any School Hitter** -- 6️⃣
 
 🔵 **SOUTH-WEST | BLUE BANNER** 🔵
-⭐  Cabalist Vanguard: **Storm 2 (No Zap/No Monu)** -- 7️⃣
-🌞  OS Combat Team 2: **Poison Oak 1** -- 8️⃣
-🌕  West Cannon Shooter: **Any School** -- 9️⃣
+⭐ Cabalist Vanguard: **Storm 2 (No Zap/No Monu)** -- 7️⃣
+🌞 OS Combat Team 2: **Poison Oak 1** -- 8️⃣
+🌕 West Cannon Shooter: **Any School** -- 9️⃣
 
 🟣 **SOUTH-EAST | PURPLE BANNER** 🟣
-⭐  Daemon Vanguard: **-yth /Support 1** -- 🇦
-🌞  OS Combat Team 2: **Poison Oak 2** -- 🇧
-🌕  West Cannon Shooter: **Any School** -- 🇨
+⭐ Daemon Vanguard: **-yth /Support 1** -- 🇦
+🌞 OS Combat Team 2: **Poison Oak 2** -- 🇧
+🌕 West Cannon Shooter: **Any School** -- 🇨
 
 ↪️ **Backups:**
 
@@ -142,15 +141,52 @@ For fire/storm/myth vanguard roles, please react with the school(s) you have ava
 https://docs.google.com/presentation/d/1bOqmLvcGoA2KAn2FHLOQMf2OC8mv4GA1YbwPWv72gNQ/edit#slide=id.p
 https://docs.google.com/presentation/d/1Cv5XJbE5zLG2BRnKPZoSqSbQSesvfDyZyzJSvHBqY0I/edit#slide=id.g27c7916204b_0_0
 https://docs.google.com/presentation/d/12wEhwmgSJHe_0sWQ0hG6mEorJ_X0T65j-cLuJkgHgfY/mobilepresent?slide=id.g2f3e5f33c2b_1_0
-https://docs.google.com/presentation/d/1GnesDgI4h6uo6GgG0WjJfT_LjRlPWKNBJVETPsFsGCg/edit"""
+https://docs.google.com/presentation/d/1GnesDgI4h6uo6GgG0WjJfT_LjRlPWKNBJVETPsFsGCg/edit""",
+
+    "Poison Oak Only Raid": """**{name}**
+
+**Date & Time:** {timestamp}
+**Duration:** {duration}
+
+🔴 **NORTH-WEST | RED BANNER** 🔴
+🌟 Poison Oak Support 1: 1️⃣ (Must have a Storm Attenuate)
+☀️ Ice Tree Support: 2️⃣
+🌛 Ice Tree Hitter: 3️⃣
+
+🟢 **NORTH-EAST | GREEN BANNER** 🟢
+🌟 Poison Oak Support 2: 4️⃣
+☀️ Death Tree Support: 5️⃣
+🌛 Death Tree Hitter: 6️⃣
+
+🔵 **SOUTH-WEST | BLUE BANNER** 🔵
+🌟 Poison Oak Support 3: 7️⃣ (Preferably Storm/Life/Death)
+☀️ Fire Tree Support: 8️⃣
+🌛 Fire Tree Hitter: 9️⃣
+
+🟣 **SOUTH-EAST | PURPLE BANNER** 🟣
+🌟 Poison Oak Storm Hitter 4: 🇦
+☀️ Life Tree Support: 🇧
+🌛 Life Tree Hitter: 🇨
+
+↪️ Backups:
+
+<:yellowstar:1232759078812385280> **REMINDERS:** <:yellowstar:1232759078812385280>
+<:Fire:1059511748199186482> & <:Death:1059512679494066216> 🌲 can chromatic weakness
+<:Ice:1059511756256456734> & <:Life:1059512659436900432> 🌲 can chromatic shield
+No Aura on <:Death:1059512679494066216> & <:Ice:1059511756256456734> 🌲
+
+<:Fire:1059511748199186482> & <:Life:1059512659436900432> 🌲 = blades only
+<:Ice:1059511756256456734> & <:Death:1059512679494066216> 🌲 = traps only
+
+{GUILD_MEMBER_PING}"""
 }
 
-# Bot templates and reaction mappings
 RAID_REACTIONS = {  
     "Cabal's Revenge Raid": ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🇦", "🇧", "🇨", "↪️"],
     "Crying Sky Raid (Gatekeeper of the Apocalypse)": ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "🇦", "🇧", "🇨", "🇩", "↪️", "<:Fire:1059511748199186482>", "<:Ice:1059511756256456734>", "<:Storm:1059511770785534062>", "<:Myth:1059512670824439819>", "<:Life:1059512659436900432>", "<:Death:1059512679494066216>", "<:Balance:1059511860539433012>"],
     "Crying Sky Raid": ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "🇦", "🇧", "🇨", "🇩", "↪️"],
-    "Voracious Void Raid": ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "🇦", "🇧", "🇨", "🇩", "↪️", "<:Fire:1059511748199186482>", "<:Storm:1059511770785534062>", "<:Myth:1059512670824439819>"]
+    "Voracious Void Raid": ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "🇦", "🇧", "🇨", "🇩", "↪️", "<:Fire:1059511748199186482>", "<:Storm:1059511770785534062>", "<:Myth:1059512670824439819>"],
+    "Poison Oak Only Raid": ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🇦", "🇧", "🇨", "↪️"]
 }
 
 SIGNUP_MAPPINGS = {  
@@ -219,6 +255,23 @@ SIGNUP_MAPPINGS = {
             "🇧": "**Drums: Mid",
             "🇨": "**Drums: Far",
             "🇩": "**Drums: Token/Mob Pull"
+        },
+        "backup": "↪️"
+    },
+    "Poison Oak Only Raid": {
+        "roles": {
+            "1️⃣": "**Poion Oak Support 1",
+            "2️⃣": "**Ice Tree Support",
+            "3️⃣": "**Ice Tree Hitter",
+            "4️⃣": "**Poison Oak Support 2",
+            "5️⃣": "**Death Tree Support",
+            "6️⃣": "**Death Tree Hitter",
+            "7️⃣": "**Poison Oak Support 3",
+            "8️⃣": "**Fire Tree Support",
+            "9️⃣": "**Fire Tree Hitter",
+            "🇦": "**Poison Oak Storm Hitter 4",
+            "🇧": "**Life Tree Support",
+            "🇨": "**Life Tree Hitter"
         },
         "backup": "↪️"
     }

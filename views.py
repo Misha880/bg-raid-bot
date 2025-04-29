@@ -41,25 +41,25 @@ class TimeButton(Button):
 
     async def callback(self, interaction: discord.Interaction):
         view = self.view
-        # ensure all dropdowns are filled before proceeding
+        # Ensure all dropdowns are filled before proceeding
         if not view.all_required_filled():
             return await interaction.response.send_message(
                 "Please complete all dropdown selections first.",
                 ephemeral=True
             )
 
-        # prompt user for exact time
+        # Prompt user for exact time
         modal = TimeModal(view.flow)
         await interaction.response.send_modal(modal)
         await modal.wait()
 
-        # validate the submitted time string
+        # Validate the submitted time string
         try:
             user_time = await validate_time_input(view.flow.start_time_str)
         except ValueError as e:
             return await interaction.followup.send(str(e), ephemeral=True)
 
-        # combine selected date and time, then convert to UTC
+        # Combine selected date and time, then convert to UTC
         date_obj = datetime.strptime(view.flow.date, "%Y-%m-%d").date()
         local_dt = datetime.combine(date_obj, user_time)
         tz = pytz.timezone(TIMEZONE_MAPPING[view.flow.tz])
@@ -67,12 +67,12 @@ class TimeButton(Button):
         start_ts = int(localized_dt.astimezone(pytz.utc).timestamp())
         ping_ts = start_ts - 30 * 60
 
-        # attach timestamps to flow for the command handler
+        # Attach timestamps to flow for the command handler
         view.flow._start_ts = start_ts
         view.flow._ping_ts = ping_ts
         view.submitted = True
 
-        # signal that input is complete
+        # Signal that input is complete
         view.stop()
 
 class FlowSelect(Select):
@@ -108,7 +108,7 @@ class TimezoneSelect(Select):
                     "AT": "AKDT" if is_dst else "AKST",
                 }[code]
             options.append(discord.SelectOption(label=abbr, value=code))
-        super().__init__(placeholder="Select Timezone…", row=row, options=options)
+        super().__init__(placeholder="Select Timezone", row=row, options=options)
 
     async def callback(self, interaction: discord.Interaction):
         choice = self.values[0]
@@ -126,11 +126,11 @@ class CreateRaidView(View):
         
         # Raid type dropdown
         raid_options = [discord.SelectOption(label=k, value=k) for k in RAID_TEMPLATES]
-        self.add_item(FlowSelect(name="raid_type", options=raid_options, row=0, placeholder="Select raid type"))
+        self.add_item(FlowSelect(name="raid_type", options=raid_options, row=0, placeholder="Select Raid"))
 
         # Duration dropdown
-        duration_options = [discord.SelectOption(label=d, value=d) for d in ("3 hours", "1.5 hours")]
-        self.add_item(FlowSelect(name="duration", options=duration_options, row=1, placeholder="Select duration"))
+        duration_options = [discord.SelectOption(label=d, value=d) for d in ("3 hours", "1 hour 30 minutes")]
+        self.add_item(FlowSelect(name="duration", options=duration_options, row=1, placeholder="Select Duration"))
 
         # Date dropdown (next 14 days)
         today = datetime.now()
@@ -140,7 +140,7 @@ class CreateRaidView(View):
                 value=(today + timedelta(days=i)).strftime("%Y-%m-%d")
             ) for i in range(14)
         ]
-        self.add_item(FlowSelect(name="date", options=date_options, row=2, placeholder="Select date"))
+        self.add_item(FlowSelect(name="date", options=date_options, row=2, placeholder="Select Date"))
 
         # Timezone dropdown
         self.add_item(TimezoneSelect(row=3))
@@ -166,11 +166,13 @@ class UpdateButton(TimeButton):
 class UpdateRaidView(CreateRaidView):
     def __init__(self, flow: CreateRaidFlow):
         super().__init__(flow)
-        # Remove raid_type select
+
+        # Remove the raid_type select
         for item in list(self.children):
             if isinstance(item, FlowSelect) and item.name == "raid_type":
                 self.remove_item(item)
-        # Prefill selections
+
+        # Prefill the remaining dropdowns
         for child in self.children:
             if isinstance(child, FlowSelect):
                 for opt in child.options:
@@ -178,12 +180,18 @@ class UpdateRaidView(CreateRaidView):
             elif isinstance(child, TimezoneSelect):
                 for opt in child.options:
                     opt.default = (opt.value == flow.tz)
-        # Replace button
-        self.remove_item(self.time_button)
-        self.time_button = UpdateButton(row=4)
-        self.time_button.disabled = not self.all_required_filled()
-        self.add_item(self.time_button)
+
+        # Relabel the button
+        self.time_button.label = "Enter Time & Update"
+        
+        # Always keep it enabled
+        self.time_button.disabled = False
+
         self.submitted = False
+
+    def all_required_filled(self) -> bool:
+        # Override CreateRaidView’s check so the button never auto-disables
+        return True
 
     async def on_timeout(self):
         for child in self.children:

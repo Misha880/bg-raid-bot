@@ -9,9 +9,9 @@ from discord.ui import Select, View
 from discord.utils import escape_markdown
 import pytz
 
-from config import GUILD_MEMBER_PING, RAID_REACTIONS, RAID_TEMPLATES, SIGNUP_MAPPINGS, TIMEZONE_MAPPING
+from config import GUILD_MEMBER_PING, RAID_REACTIONS, RAID_TEMPLATES, SIGNUP_MAPPINGS, TIMEZONE_MAPPING, TEST_CHANNEL_ID
 from database import db
-from utils import permission_check, validate_time_input, fetch_signup_post, edit_signup_post
+from utils import permission_check ,get_ping_mention, validate_time_input, fetch_signup_post, edit_signup_post
 from views import CreateRaidFlow, CreateRaidView, UpdateRaidView
 
 # Setup logging
@@ -60,8 +60,20 @@ class RaidBot(commands.Bot):
 
             # Pre-populate the in-memory sign-ups cache for this raid_id
             try:
+                # Fetch the original signup message
                 raid_message = await channel.fetch_message(raid_id)
-                cache: Dict[str, Set[str]] = {}
+
+                # Initialize the active_raids entry so we can cache the Message
+                active_raids[raid_id] = {
+                    "ping_task": None,      # will be overwritten when scheduling
+                    "name":       raid_name,
+                    "raid_type":  raid_type,
+                    "channel_id": channel_id,
+                    "message":    raid_message  # cache the Message object
+                }
+
+                # Build the reaction cache from the message’s existing reactions
+                cache: Dict[str, Set[int]] = {}
                 for reaction in raid_message.reactions:
                     emoji = str(reaction.emoji)
                     uid_set: Set[int] = set()
@@ -70,22 +82,19 @@ class RaidBot(commands.Bot):
                             continue
                         uid_set.add(user.id)
                     cache[emoji] = uid_set
+
+                # Store into the global cache
                 signups_cache[raid_id] = cache
                 logger.info(f"Preloaded signups cache for raid {raid_id}")
+
             except Exception as e:
                 logger.warning(f"Could not preload signups cache for raid {raid_id}: {e}")
-
             ping_time_utc = datetime.fromtimestamp(ping_timestamp, tz=pytz.utc)
             delay = (ping_time_utc - current_time).total_seconds()
             
             if delay > 0:
                 ping_task = asyncio.create_task(self.schedule_ping(delay, channel, raid_id))
-                active_raids[raid_id] = {
-                    "ping_task": ping_task, 
-                    "name": raid_name, 
-                    "raid_type": raid_type,
-                    "channel_id": channel_id
-                }
+                active_raids[raid_id]["ping_task"] = ping_task
                 logger.info(f"Rescheduled ping for raid {raid_id} '{raid_name}' in {delay} seconds.")
             else:
                 logger.info(f"Ping time for raid {raid_id} '{raid_name}' has passed; removing record.")
@@ -97,8 +106,11 @@ class RaidBot(commands.Bot):
             await asyncio.sleep(delay)
 
             # Send the reminder
-            await channel.send(
-                f"{GUILD_MEMBER_PING} Raid starts in 30 minutes! Please join the raid VC, head to the guild house, and submit your deck to your team lead.")
+            if channel.id == TEST_CHANNEL_ID:
+                await channel.send("TEST MODE: reminder ping successfully simulated!")
+            else:
+                await channel.send(
+                    f"{GUILD_MEMBER_PING} Raid starts in 30 minutes! Please join the raid VC, head to the guild house, and submit your deck to your team lead.")
 
             # Purge in‑memory signups cache
             signups_cache.pop(raid_id, None)
@@ -116,10 +128,10 @@ class RaidBot(commands.Bot):
         except Exception as e:
             logger.error(f"Error in schedule_ping for raid {raid_id}: {e}", exc_info=True)
 
-            # ensure cache is also purged on errors
+            # Ensure cache is also purged on errors
             signups_cache.pop(raid_id, None)
 
-            # cleanup DB and in‑memory state on failure
+            # Cleanup DB and in‑memory state on failure
             if raid_id in active_raids:
                 del active_raids[raid_id]
             await db.execute("DELETE FROM active_raids WHERE raid_id = ?", (raid_id,))
@@ -145,38 +157,50 @@ async def on_ready():
 
 @bot.event
 async def on_raw_reaction_add(payload):
-    # log raw reaction event for debugging
-    logger.debug(f"raw_reaction_add: message_id={payload.message_id} emoji={payload.emoji} user_id={payload.user_id}")
-
-    # ignore reactions on messages we’re not tracking
-    raid_info = active_raids.get(payload.message_id)
-    if not raid_info:
+    # Quick exit if we don’t care about this message or if it’s from a bot
+    raid = active_raids.get(payload.message_id)
+    if not raid or (payload.member and payload.member.bot):
         return
-
-    # obtain member object to allow removal
-    guild = bot.get_guild(payload.guild_id) or await bot.fetch_guild(payload.guild_id)
-    member = payload.member or guild.get_member(payload.user_id) or await guild.fetch_member(payload.user_id)
-    if member.bot:
+    
+    # Skip bot reactions
+    if payload.member and payload.member.bot:
         return
 
     emoji = str(payload.emoji)
-    raid_type = raid_info["raid_type"]
+    allowed = set(RAID_REACTIONS[raid["raid_type"]])
+    allowed.add(SIGNUP_MAPPINGS[raid["raid_type"]]["backup"])
 
-    # assemble the set of permitted emojis
-    allowed = set(RAID_REACTIONS.get(raid_type, []))
-    allowed.add(SIGNUP_MAPPINGS[raid_type]["backup"])
-
-    # remove any reaction not in the permitted list
     if emoji not in allowed:
-        channel = bot.get_channel(payload.channel_id) or await bot.fetch_channel(payload.channel_id)
-        message = await channel.fetch_message(payload.message_id)
-        logger.info(f"Removing unauthorized reaction {emoji} from user {member.display_name}")
-        await message.remove_reaction(payload.emoji, member)
+        # Dispatch a non-blocking prune task and return immediately
+        asyncio.create_task(_prune_reaction(
+            channel_id=payload.channel_id,
+            message_id=payload.message_id,
+            emoji=emoji,
+            user_id=payload.user_id
+        ))
         return
 
-    # record valid reaction in cache
+    # Record valid reaction in cache
     cache = signups_cache.setdefault(payload.message_id, {})
     cache.setdefault(emoji, set()).add(payload.user_id)
+
+
+async def _prune_reaction(channel_id: int, message_id: int, emoji: str, user_id: int):
+    """Background task to remove one unauthorized reaction as fast as possible."""
+    raid = active_raids.get(message_id)
+    # Use cached Message if available
+    msg = raid.get("message") if raid else None
+    if not msg:
+        channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+        msg = await channel.fetch_message(message_id)
+        if raid:
+            raid["message"] = msg
+
+    try:
+        # Remove only that single emoji instance from the offending user
+        await msg.remove_reaction(emoji, discord.Object(id=user_id))
+    except Exception as e:
+        logger.warning(f"Could not prune reaction {emoji} on {message_id}: {e}")
 
 @bot.event
 async def on_raw_reaction_remove(payload):
@@ -200,6 +224,8 @@ class RaidSelect(Select):
     async def callback(self, interaction: Interaction):
         self.selected_raid = int(self.values[0])
         await interaction.response.defer(ephemeral=True)
+
+        # Strip the view to disable further interactions after success
         await interaction.edit_original_response(view=None)
         self.view.stop()
 
@@ -207,42 +233,81 @@ class RaidSelect(Select):
 @permission_check
 @bot.tree.command(name="createraid", description="Create a new raid")
 async def create_raid(interaction: Interaction, raid_name: str):
+
+    # Initialize the flow state and view
     flow = CreateRaidFlow(raid_name=raid_name)
     view = CreateRaidView(flow)
 
-    # send the modal-based configuration flow
+    # Prompt the user with the configuration UI
     await interaction.response.send_message(
-        "**Raid Configuration**\n"
-        "Select type, date, duration, timezone, then enter a time.",
+        "**Raid Configuration**\n",
         view=view,
         ephemeral=True
     )
 
-    # wait for the user to submit or timeout
+    # Wait for the user to complete or timeout
     await view.wait()
     if not view.submitted:
-        return  # user cancelled or view timed out
+        # User did not finish; abort without side-effects
+        return
+    
+    # Strip the view to disable further interactions after success
+    await interaction.edit_original_response(view=None)
 
-    # render the signup announcement
+    channel = interaction.channel
+
+
+
+    # Build the timestamp tag for Discord
     ts_tag = f"<t:{flow._start_ts}:F>"
+
+    # Render the announcement content from the template
     content = RAID_TEMPLATES[flow.raid_type].format(
         name=flow.raid_name,
         timestamp=ts_tag,
         duration=flow.duration,
-        GUILD_MEMBER_PING=GUILD_MEMBER_PING
+        GUILD_MEMBER_PING=get_ping_mention(interaction.channel.id)
     )
-    channel = interaction.channel
+
+    # Send the signup announcement
     signup_msg = await channel.send(content)
 
-    # add all reaction emojis for sign-ups
-    for emoji in RAID_REACTIONS[flow.raid_type]:
-        await signup_msg.add_reaction(emoji)
+    # Start tracking this raid
+    signups_cache[signup_msg.id] = {}
+    active_raids[signup_msg.id] = {
+        "ping_task": None,
+        "name": flow.raid_name,
+        "raid_type": flow.raid_type,
+        "channel_id": channel.id,
+        "message": signup_msg
+    }
 
-    # persist raid metadata for reminders and restarts
+    # Add reactions sequentially while handling Discord's 20-reaction limit
+    allowed = set(RAID_REACTIONS[flow.raid_type])
+    allowed.add(SIGNUP_MAPPINGS[flow.raid_type]["backup"])  # permit the backup slot
+
+    for emoji in RAID_REACTIONS[flow.raid_type]:
+        try:
+            await signup_msg.add_reaction(emoji)             # attach emoji for sign-ups
+        except discord.Forbidden:
+            logger.warning("Max unique reactions reached; pruning unauthorized emojis")
+            # fetch fresh message state
+            message = await signup_msg.channel.fetch_message(signup_msg.id)
+            # remove each reaction not in our allowed set
+            for reaction in message.reactions:
+                if str(reaction.emoji) not in allowed:
+                    await signup_msg.clear_reaction(reaction.emoji)
+            # now retry adding just this one
+            await signup_msg.add_reaction(emoji)
+
+    # Persist the new raid into the database for scheduling and recovery
     await db.execute(
-        "INSERT INTO active_raids "
-        "(raid_id, raid_name, channel_id, start_timestamp, ping_timestamp, duration, tz) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        """
+        INSERT INTO active_raids
+          (raid_id, raid_name, channel_id, raid_type, start_timestamp,
+           ping_timestamp, duration, tz)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
         (
             signup_msg.id,
             flow.raid_name,
@@ -252,18 +317,14 @@ async def create_raid(interaction: Interaction, raid_name: str):
             flow._ping_ts,
             flow.duration,
             flow.tz
-            )
+        )
     )
 
-    # schedule the 30-minute warning task
+    # Schedule the 30-minute reminder task
     delay = flow._ping_ts - int(datetime.now(pytz.utc).timestamp())
     ping_task = asyncio.create_task(bot.schedule_ping(delay, channel, signup_msg.id))
-    active_raids[signup_msg.id] = {
-        "ping_task": ping_task,
-        "name": flow.raid_name,
-        "raid_type": flow.raid_type,
-        "channel_id": channel.id
-    }
+    # Track the task in memory for possible cancellation
+    active_raids[signup_msg.id]["ping_task"] = ping_task
 
 # /updateraid command
 @permission_check
@@ -271,20 +332,14 @@ async def create_raid(interaction: Interaction, raid_name: str):
 async def update_raid(interaction: Interaction):
     await interaction.response.defer(ephemeral=True)
 
-    # Fetch all active raids
-    rows = await db.fetchall(
-        "SELECT raid_id, raid_name, channel_id, raid_type, start_timestamp, duration, tz "
-        "FROM active_raids"
-    )
-    if not rows:
+    # Build choices from the in-memory cache
+    raids = [(raid_id, info["name"]) for raid_id, info in active_raids.items()]
+    if not raids:
         return await interaction.followup.send("There are no active raids.", ephemeral=True)
 
     # Prompt user to select which raid to update
     selector_view = View(timeout=60)
-    selector_view.add_item(RaidSelect(
-        raids=[(r[0], r[1]) for r in rows],
-        placeholder="Select raid to update…"
-    ))
+    selector_view.add_item(RaidSelect(raids=raids, placeholder="Select raid to update…"))
     await interaction.followup.send("Choose a raid to update:", view=selector_view, ephemeral=True)
     await selector_view.wait()
 
@@ -292,15 +347,22 @@ async def update_raid(interaction: Interaction):
     if raid_id is None:
         return  # user timed out or cancelled
 
-    # Load selected raid's settings
-    (_, raid_name, channel_id, raid_type, start_ts, duration, tz_code) = \
-        next(r for r in rows if r[0] == raid_id)
+    # Fetch full raid details in one DB call
+    row = await db.fetchone(
+        "SELECT raid_id, raid_name, channel_id, raid_type, start_timestamp, duration, tz "
+        "FROM active_raids WHERE raid_id = ?",
+        (raid_id,)
+    )
+    if not row:
+        return await interaction.followup.send("Raid not found in database.", ephemeral=True)
+
+    raid_id, raid_name, channel_id, raid_type, start_ts, duration, tz_code = row
 
     # Convert stored UTC timestamp into user's local time
     user_tz = pytz.timezone(TIMEZONE_MAPPING[tz_code])
     local_dt = datetime.fromtimestamp(start_ts, pytz.utc).astimezone(user_tz)
 
-    # Prepare flow with existing values
+    # Prepare the flow with existing values
     flow = CreateRaidFlow(raid_name=raid_name)
     flow.raid_type      = raid_type
     flow.duration       = duration
@@ -308,35 +370,37 @@ async def update_raid(interaction: Interaction):
     flow.tz             = tz_code
     flow.start_time_str = local_dt.strftime("%I:%M%p")
 
-    # Display pre-filled update form
+    # Show the pre-filled update form
     update_view = UpdateRaidView(flow)
-    await interaction.followup.send("**Update raid details**", view=update_view, ephemeral=True)
+    update_msg = await interaction.followup.send("**Update raid details**", view=update_view, ephemeral=True)
     await update_view.wait()
     if not update_view.submitted:
-        return  # user closed without submitting
+        return  # User canceled
 
-    # Parse new date/time into a UTC timestamp
+    await update_msg.edit(view=None)
+
+    # Parse the new date/time into a UTC timestamp
     new_time = await validate_time_input(flow.start_time_str)
     new_date = datetime.strptime(flow.date, "%Y-%m-%d").date()
     combined = datetime.combine(new_date, new_time)
     localized = user_tz.localize(combined, is_dst=None)
     new_utc   = localized.astimezone(pytz.utc)
     new_start = int(new_utc.timestamp())
-    new_ping  = new_start - 30 * 60  # thirty minutes before start
+    new_ping  = new_start - 30 * 60  # 30 minutes before start
 
-    # Attempt to fetch and edit the original sign-up post
-    signup_post = await fetch_signup_post(channel_id, raid_id)
+    # Attempt to update the sign-up post
+    signup_post = await fetch_signup_post(bot, channel_id, raid_id)
     if signup_post:
         ts_tag = f"<t:{new_start}:F>"
         new_content = RAID_TEMPLATES[flow.raid_type].format(
             name=raid_name,
-            duration=flow.duration,
             timestamp=ts_tag,
-            GUILD_MEMBER_PING=GUILD_MEMBER_PING
+            duration=flow.duration,
+            GUILD_MEMBER_PING=get_ping_mention(channel_id)
         )
-        await edit_signup_post(signup_post, new_content, raid_id)
+        await edit_signup_post(signup_post, new_content, interaction)
 
-    # Persist updated schedule to the database
+    # Persist the updated schedule
     await db.execute(
         "UPDATE active_raids "
         "SET start_timestamp = ?, ping_timestamp = ?, duration = ?, tz = ? "
@@ -344,12 +408,11 @@ async def update_raid(interaction: Interaction):
         (new_start, new_ping, flow.duration, flow.tz, raid_id)
     )
 
-    # Cancel existing reminder and schedule a new one
+    # Cancel the old ping and reschedule
     old = active_raids.pop(raid_id, None)
     if old and old.get("ping_task"):
         old["ping_task"].cancel()
 
-    # Ensure we have a channel object for scheduling
     channel = signup_post.channel if signup_post else (
         bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
     )
@@ -360,10 +423,10 @@ async def update_raid(interaction: Interaction):
             "ping_task": task,
             "name":      raid_name,
             "raid_type": flow.raid_type,
-            "channel_id": channel_id
+            "channel_id": channel_id,
+            "message":   active_raids.get(raid_id, {}).get("message")
         }
     else:
-        # If the warning window has already passed, remove its record
         await db.execute("DELETE FROM active_raids WHERE raid_id = ?", (raid_id,))
 
     await interaction.followup.send("Raid updated successfully.", ephemeral=True)
@@ -390,7 +453,7 @@ async def cancel_raid(interaction: Interaction):
     await view.wait()
 
     # Which one did they pick?
-    selector: RaidSelect = view.children[0]  # our single item
+    selector: RaidSelect = view.children[0]
     raid_id = selector.selected_raid
     if raid_id is None:
         return

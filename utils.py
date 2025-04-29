@@ -2,7 +2,7 @@ import re
 from datetime import datetime
 from functools import wraps
 from discord import Interaction
-from config import GUILD_LEADER_ROLE_ID, RAID_CAPTAIN_ROLE_ID
+from config import GUILD_LEADER_ROLE_ID, RAID_CAPTAIN_ROLE_ID, GUILD_MEMBER_PING, TEST_CHANNEL_ID
 
 # Permission decorator
 def permission_check(func):
@@ -16,6 +16,10 @@ def permission_check(func):
             )
         return await func(interaction, *args, **kwargs)
     return wrapper
+
+def get_ping_mention(channel_id: int) -> str:
+    """Return TEST MODE in the test channel, otherwise the real guild member ping."""
+    return "TEST MODE" if channel_id == TEST_CHANNEL_ID else GUILD_MEMBER_PING
 
 # Time parsing patterns for user input
 _TIME_PATTERNS = [
@@ -40,7 +44,7 @@ async def validate_time_input(time_str: str) -> datetime.time:
             continue
         formatted = formatter(m.groups())
         try:
-            # detect AM/PM vs 24h format
+            # Detect AM/PM vs 24h format
             if formatted[-2:].upper() in ("AM", "PM"):
                 return datetime.strptime(formatted, "%I:%M%p").time()
             return datetime.strptime(formatted, "%H:%M").time()

@@ -117,9 +117,9 @@ https://docs.google.com/presentation/d/1ehNKtXakwFsyHIe-JIOjAPwP4Juk5gZchjVKX9hh
 <:greenstar:1366184888268492881> **Jade:** 4️⃣
 
 ☄️ **OUTSIDE COMBAT** ☄️
-🧡 **Surge/Milli Supp:** 5️⃣
+🧡 **Surge/Milli Support:** 5️⃣
 🩷 **Surge/Mob Pull:** 6️⃣
-💜 **Elf Jade/Milli Supp:** 7️⃣
+💜 **Elf Jade/Milli Support:** 7️⃣
 💚 **Off-School Elf/Milli Hitter:** 8️⃣
 
 🎶 **DRUMS & PET TOKEN** 🎶
@@ -186,86 +186,86 @@ RAID_REACTIONS = {
 SIGNUP_MAPPINGS = {  
     "Cabal's Revenge": {
         "roles": {
-            "1️⃣": "**Northwest: Personal Daemon -yth/Fire/Storm 2",
-            "2️⃣": "**Northwest: Oblongata -yth 1",
-            "3️⃣": "**Northwest: West Cannon Mob Puller",
-            "4️⃣": "**Northeast: Divine Cabalist Support 1",
-            "5️⃣": "**Northeast: Oblongata -yth 2",
-            "6️⃣": "**Northeast: East Cannon Mob Puller",
-            "7️⃣": "**Southwest: Divine Cabalist Storm 2",
-            "8️⃣": "**Southwest: Poison Oak 1",
-            "9️⃣": "**Southwest: West Cannon Shooter 1",
-            "🇦": "**Southeast: Personal Daemon -yth/Support 1",
-            "🇧": "**Southeast: Poison Oak 2",
-            "🇨": "**Southeast: West Cannon Shooter 2"
+            "1️⃣": "**Northwest: Personal Daemon -yth/Fire/Storm 2**",
+            "2️⃣": "**Northwest: Oblongata -yth 1**",
+            "3️⃣": "**Northwest: West Cannon Mob Puller**",
+            "4️⃣": "**Northeast: Divine Cabalist Support 1**",
+            "5️⃣": "**Northeast: Oblongata -yth 2**",
+            "6️⃣": "**Northeast: East Cannon Mob Puller**",
+            "7️⃣": "**Southwest: Divine Cabalist Storm 2**",
+            "8️⃣": "**Southwest: Poison Oak 1**",
+            "9️⃣": "**Southwest: West Cannon Shooter 1**",
+            "🇦": "**Southeast: Personal Daemon -yth/Support 1**",
+            "🇧": "**Southeast: Poison Oak 2**",
+            "🇨": "**Southeast: West Cannon Shooter 2**"
         },
         "backup": "↪️"
     },
     "Crying Sky (Gatekeeper of the Apocalypse)": {
         "roles": {
-            "1️⃣": "**Ixta & Autloc Team: Support 1",
-            "2️⃣": "**Ixta & Autloc Team: Balance 2",
-            "3️⃣": "**Ixta & Autloc Team: Storm 3",
-            "4️⃣": "**Ixta & Autloc Team: Storm/Form/Morm 4",
-            "5️⃣": "**Yetaxa Team: Fire/Lire 1",
-            "6️⃣": "**Yetaxa Team: Fire 2",
-            "7️⃣": "**Yetaxa Team: Fire/Mire 3",
-            "8️⃣": "**Yetaxa Team: Fire 4",
-            "🇦": "**Cameca Team:** -yth 1 (Preferably Ice)",
-            "🇧": "**Cameca Team:** -yth 2 (Preferably Death)",
-            "🇨": "**Cameca Team:** Fyth/Styth 3",
-            "🇩": "**Cameca Team:** Fyth/Styth 4"
+            "1️⃣": "**Ixta & Autloc Team: Support 1**",
+            "2️⃣": "**Ixta & Autloc Team: Balance 2**",
+            "3️⃣": "**Ixta & Autloc Team: Storm 3**",
+            "4️⃣": "**Ixta & Autloc Team: Storm/Form/Morm 4**",
+            "5️⃣": "**Yetaxa Team: Fire/Lire 1**",
+            "6️⃣": "**Yetaxa Team: Fire 2**",
+            "7️⃣": "**Yetaxa Team: Fire/Mire 3**",
+            "8️⃣": "**Yetaxa Team: Fire 4**",
+            "🇦": "**Cameca Team: -yth 1 (Preferably Ice)**",
+            "🇧": "**Cameca Team: -yth 2 (Preferably Death)**",
+            "🇨": "**Cameca Team: Fyth/Styth 3**",
+            "🇩": "**Cameca Team: Fyth/Styth 4**"
         },
         "backup": "↪️"
     },
     "Crying Sky": {
         "roles": {
-            "1️⃣": "**Ixta & Autloc Team: Support 1",
-            "2️⃣": "**Ixta & Autloc Team: Support 2",
-            "3️⃣": "**Ixta & Autloc Team: Storm 3",
-            "4️⃣": "**Ixta & Autloc Team: -orm 4",
-            "5️⃣": "**Yetaxa Team: Fire/Lire 1",
-            "6️⃣": "**Yetaxa Team: Fire 2",
-            "7️⃣": "**Yetaxa Team: -ire 3",
-            "8️⃣": "**Yetaxa Team: Fire 4",
-            "🇦": "**Cameca Team: -yth 1",
-            "🇧": "**Cameca Team: -yth 2",
-            "🇨": "**Cameca Team: Fyth/Styth 3",
-            "🇩": "**Cameca Team: Fyth/Styth 4"
+            "1️⃣": "**Ixta & Autloc Team: Support 1**",
+            "2️⃣": "**Ixta & Autloc Team: Support 2**",
+            "3️⃣": "**Ixta & Autloc Team: Storm 3**",
+            "4️⃣": "**Ixta & Autloc Team: -orm 4**",
+            "5️⃣": "**Yetaxa Team: Fire/Lire 1**",
+            "6️⃣": "**Yetaxa Team: Fire 2**",
+            "7️⃣": "**Yetaxa Team: -ire 3**",
+            "8️⃣": "**Yetaxa Team: Fire 4**",
+            "🇦": "**Cameca Team: -yth 1**",
+            "🇧": "**Cameca Team: -yth 2**",
+            "🇨": "**Cameca Team: Fyth/Styth 3**",
+            "🇩": "**Cameca Team: Fyth/Styth 4**"
         },
         "backup": "↪️"
     },
     "Voracious Void": {
         "roles": {
-            "1️⃣": "**Vanguard: Fire/Myth/Storm 1",
-            "2️⃣": "**Vanguard: Fire/Myth/Storm 2",
-            "3️⃣": "**Vanguard: Storm 3",
-            "4️⃣": "**Vanguard: Jade",
-            "5️⃣": "**Outside Combat: Surge/Milli Supp",
-            "6️⃣": "**Outside Combat: Surge/Mob Pull",
-            "7️⃣": "**Outside Combat: Elf Jade/Milli Supp",
-            "8️⃣": "**Outside Combat: Elf Hitter/Milli Hitter",
-            "🇦": "**Drums: Close/Lead",
-            "🇧": "**Drums: Mid",
-            "🇨": "**Drums: Far",
-            "🇩": "**Pet Token/Mob Pull"
+            "1️⃣": "**Vanguard: Fire/Myth/Storm 1**",
+            "2️⃣": "**Vanguard: Fire/Myth/Storm 2**",
+            "3️⃣": "**Vanguard: Storm 3**",
+            "4️⃣": "**Vanguard: Jade**",
+            "5️⃣": "**Outside Combat: Surge/Milli Support**",
+            "6️⃣": "**Outside Combat: Surge/Mob Pull**",
+            "7️⃣": "**Outside Combat: Elf Jade/Milli Support**",
+            "8️⃣": "**Outside Combat: Elf Hitter/Milli Hitter**",
+            "🇦": "**Drums: Close/Lead**",
+            "🇧": "**Drums: Mid**",
+            "🇨": "**Drums: Far**",
+            "🇩": "**Pet Token/Mob Pull**"
         },
         "backup": "↪️"
     },
     "Poison Oak Only": {
         "roles": {
-            "1️⃣": "**Northwest: Poion Oak Support 1",
-            "2️⃣": "**Northwest: Ice Tree Support",
-            "3️⃣": "**Northwest: Ice Tree Hitter",
-            "4️⃣": "**Northeast: Poison Oak Support 2",
-            "5️⃣": "**Northeast: Death Tree Support",
-            "6️⃣": "**Northeast: Death Tree Hitter",
-            "7️⃣": "**Southwest: Poison Oak Support 3",
-            "8️⃣": "**Southwest: Fire Tree Support",
-            "9️⃣": "**Southwest: Fire Tree Hitter",
-            "🇦": "**Southeast: Poison Oak Storm Hitter 4",
-            "🇧": "**Southeast: Life Tree Support",
-            "🇨": "**Southeast: Life Tree Hitter"
+            "1️⃣": "**Northwest: Poison Oak Support 1**",
+            "2️⃣": "**Northwest: Ice Tree Support**",
+            "3️⃣": "**Northwest: Ice Tree Hitter**",
+            "4️⃣": "**Northeast: Poison Oak Support 2**",
+            "5️⃣": "**Northeast: Death Tree Support**",
+            "6️⃣": "**Northeast: Death Tree Hitter**",
+            "7️⃣": "**Southwest: Poison Oak Support 3**",
+            "8️⃣": "**Southwest: Fire Tree Support**",
+            "9️⃣": "**Southwest: Fire Tree Hitter**",
+            "🇦": "**Southeast: Poison Oak Storm Hitter 4**",
+            "🇧": "**Southeast: Life Tree Support**",
+            "🇨": "**Southeast: Life Tree Hitter**"
         },
         "backup": "↪️"
     }

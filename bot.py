@@ -1,17 +1,17 @@
 import asyncio, logging, os
 from datetime import datetime
+import io
 from typing import Dict, List, Set, Tuple
 
 import discord
 from discord import Interaction
 from discord.ext import commands
 from discord.ui import Select, View
-from discord.utils import escape_markdown
 import pytz
 
 from config import GUILD_MEMBER_PING, RAID_REACTIONS, RAID_TEMPLATES, SIGNUP_MAPPINGS, TIMEZONE_MAPPING, TEST_CHANNEL_ID
 from database import db
-from utils import permission_check ,get_ping_mention, validate_time_input, fetch_signup_post, edit_signup_post
+from utils import permission_check ,get_ping_mention, validate_time_input, fetch_signup_post, edit_signup_post, sort_key, get_sorted_display_names
 from views import CreateRaidFlow, CreateRaidView, UpdateRaidView
 
 # Setup logging
@@ -57,20 +57,19 @@ class RaidBot(commands.Bot):
             except Exception as e:
                 logger.warning(f"Could not fetch channel {channel_id} for raid {raid_id}: {e}")
                 continue
-
+            
+            # Initialize the active_raids entry so we can cache the Message
+            active_raids[raid_id] = {
+                "ping_task":  None,
+                "name":       raid_name,
+                "raid_type":  raid_type,
+                "channel_id": channel_id,
+                "message":    None
+                }
             # Pre-populate the in-memory sign-ups cache for this raid_id
             try:
                 # Fetch the original signup message
                 raid_message = await channel.fetch_message(raid_id)
-
-                # Initialize the active_raids entry so we can cache the Message
-                active_raids[raid_id] = {
-                    "ping_task": None,      # will be overwritten when scheduling
-                    "name":       raid_name,
-                    "raid_type":  raid_type,
-                    "channel_id": channel_id,
-                    "message":    raid_message  # cache the Message object
-                }
 
                 # Build the reaction cache from the message’s existing reactions
                 cache: Dict[str, Set[int]] = {}
@@ -284,20 +283,26 @@ async def create_raid(interaction: Interaction, raid_name: str):
 
     # Add reactions sequentially while handling Discord's 20-reaction limit
     allowed = set(RAID_REACTIONS[flow.raid_type])
-    allowed.add(SIGNUP_MAPPINGS[flow.raid_type]["backup"])  # permit the backup slot
+    allowed.add(SIGNUP_MAPPINGS[flow.raid_type]["backup"])
+
+    cache = signups_cache.get(signup_msg.id, {})
 
     for emoji in RAID_REACTIONS[flow.raid_type]:
+        # Remove any user reaction so bot’s is first
+        if cache.get(emoji):
+            await signup_msg.clear_reaction(emoji)
+
         try:
-            await signup_msg.add_reaction(emoji)             # attach emoji for sign-ups
+            await signup_msg.add_reaction(emoji)
         except discord.Forbidden:
             logger.warning("Max unique reactions reached; pruning unauthorized emojis")
-            # fetch fresh message state
+            # Fetch fresh message state
             message = await signup_msg.channel.fetch_message(signup_msg.id)
-            # remove each reaction not in our allowed set
+            # Remove each reaction not in our allowed set
             for reaction in message.reactions:
                 if str(reaction.emoji) not in allowed:
                     await signup_msg.clear_reaction(reaction.emoji)
-            # now retry adding just this one
+            # Retry adding only this emoji
             await signup_msg.add_reaction(emoji)
 
     # Persist the new raid into the database for scheduling and recovery
@@ -496,73 +501,112 @@ async def cancel_raid(interaction: Interaction):
 @bot.tree.command(name="showsignups", description="Show sign-ups for an active raid")
 async def showsignups(interaction: Interaction):
     await interaction.response.defer(ephemeral=True)
-    logger.info(f"Sign-ups check by {interaction.user.display_name}")
+    logger.info(f"Sign-ups requested by {interaction.user.display_name}")
 
-    # Load active raids
-    raids = await db.fetchall("""
-        SELECT raid_id, raid_name, channel_id, raid_type
-        FROM active_raids
-        ORDER BY raid_id DESC
-    """)
+    # Fetch active raids from the database
+    raids = await db.fetchall(
+        "SELECT raid_id, raid_name, channel_id, raid_type FROM active_raids ORDER BY raid_id DESC"
+    )
     if not raids:
-        return await interaction.followup.send("There are no active raids.", ephemeral=True)
+        await interaction.followup.send("There are no active raids.", ephemeral=True)
+        return
 
-    # Show dropdown
+    # Present a dropdown for the user to select a raid
     options = [(r_id, name) for r_id, name, _, _ in raids]
+    selector = RaidSelect(options, placeholder="Select raid to view sign-ups…")
     view = View(timeout=30)
-    view.add_item(RaidSelect(options, placeholder="Select raid to view sign-ups…"))
+    view.add_item(selector)
     await interaction.followup.send("Select a raid to view sign-ups:", view=view, ephemeral=True)
     await view.wait()
 
-    selector: RaidSelect = view.children[0]
+    # Abort if the user did not select anything
     raid_id = selector.selected_raid
     if raid_id is None:
         return
 
-    # Extract chosen raid metadata
+    # Load raid metadata and in-memory cache
     _, raid_name, _, raid_type = next(r for r in raids if r[0] == raid_id)
     mapping = SIGNUP_MAPPINGS[raid_type]
-
-    # Build sign-up cache
     cache = signups_cache.get(raid_id, {})
     guild = interaction.guild or await bot.fetch_guild(interaction.guild_id)
 
-    # Per-role lists
-    role_signups = {
-        mapping["roles"][emoji]: cache.get(emoji, set())
-        for emoji in mapping["roles"]
-    }
-    backup_ids = cache.get(mapping["backup"], set())
-    all_ids = set().union(*role_signups.values(), backup_ids)
+    # Assemble each line of the summary
+    lines: List[str] = []
+    lines.append(f"**{raid_name}**")
+    lines.append("\n__**Roles**__")
+    for emoji, role_desc in mapping["roles"].items():
+        members = get_sorted_display_names(cache.get(emoji, set()), guild) or ["None"]
+        lines.append(f"{emoji} {role_desc}**\n{', '.join(members)}")
 
-    # Assemble output
-    lines: List[str] = [f"**{raid_name}**\n\n__**Roles**__"]
-    for emoji in RAID_REACTIONS[raid_type]:
-        if emoji in mapping["roles"]:
-            role_desc = mapping["roles"][emoji]
-            names = sorted(
-                (
-                    escape_markdown(member.display_name)
-                    for uid in role_signups[role_desc]
-                    if (member := guild.get_member(uid))
-                ),
-                key=str.lower
+    # Backups section
+    backup_members = get_sorted_display_names(cache.get(mapping["backup"], set()), guild) or ["None"]
+    lines.append("")  # blank line for separation
+    lines.append("__**Backups**__")
+    lines.append(f"{mapping['backup']} {', '.join(backup_members)}")
+
+    # Full roster section
+    all_ids = set().union(*cache.values())
+    all_members = get_sorted_display_names(all_ids, guild) or ["None"]
+    lines.append("")  # blank line for separation
+    lines.append("__**Full Roster**__")
+    lines.append(f"{', '.join(all_members)}")
+
+    # Total count
+    lines.append("")  # blank line for separation
+    lines.append(f"**Number of Sign-ups:** {len(all_ids)}")
+
+    # Build blocks so each section stays intact.
+    blocks: List[str] = []
+
+    # Title section
+    blocks.append(f"**{raid_name}**")
+
+    # Roles section (merge into one block so no empty lines between)
+    role_lines = ["__**Roles**__"]
+    for emoji, role_desc in mapping["roles"].items():
+        members = get_sorted_display_names(cache.get(emoji, set()), guild) or ["None"]
+        role_lines.append(f"{emoji} {role_desc}\n {', '.join(members)}")
+    blocks.append("\n".join(role_lines))
+
+    # Backups section
+    backup_members = get_sorted_display_names(cache.get(mapping["backup"], set()), guild) or ["None"]
+    blocks.append(f"__**Backups**__\n{mapping['backup']} {', '.join(backup_members)}")
+
+    # Full roster section
+    all_members = get_sorted_display_names(all_ids, guild) or ["None"]
+    blocks.append(f"__**Full Roster**__\n{', '.join(all_members)}")
+
+    # Total count section
+    blocks.append(f"**Number of Sign-ups:** {len(all_ids)}")
+
+    # Send blocks in chunks under the 2000-character limit
+    MAX_MESSAGE_LENGTH = 2000
+    buffer = ""
+    for block in blocks:
+        # Add a single newline after each block
+        prefix = "\n" if buffer else ""
+        # Prepend a blank line before all but the first block
+        chunk = prefix + block + "\n"
+
+        # Flush the buffer if this block would exceed the limit
+        if len(buffer) + len(chunk) > MAX_MESSAGE_LENGTH:
+            await interaction.followup.send(
+                buffer.rstrip(),
+                ephemeral=True,
+                allowed_mentions=discord.AllowedMentions.none()
             )
-            lines.append(f"{emoji} {role_desc}:** {', '.join(names) or 'None'}")
+            buffer = ""
 
-    lines.append("\n__**Backups**__")
-    backup_names = sorted(
-        (
-            escape_markdown(member.display_name)
-            for uid in backup_ids
-            if (member := guild.get_member(uid))
-        ),
-        key=str.lower
-    )
-    lines.append(f"{mapping['backup']} {', '.join(backup_names) or 'None'}")
-    lines.append(f"\n**Number of Sign-ups:** {len(all_ids)}")
+        # Append the block to the buffer
+        buffer += chunk
 
-    await interaction.followup.send("\n".join(lines), ephemeral=True)
+    # Send any remaining content
+    if buffer:
+        await interaction.followup.send(
+            buffer.rstrip(),
+            ephemeral=True,
+            allowed_mentions=discord.AllowedMentions.none()
+        )
 
 if __name__ == "__main__":
     bot.run(TOKEN)

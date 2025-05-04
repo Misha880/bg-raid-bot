@@ -1,7 +1,12 @@
 import re
 from datetime import datetime
 from functools import wraps
-from discord import Interaction
+from typing import Iterable, List
+import unicodedata
+
+from discord import Guild, Interaction
+from discord.utils import escape_markdown
+
 from config import GUILD_LEADER_ROLE_ID, RAID_CAPTAIN_ROLE_ID, GUILD_MEMBER_PING, TEST_CHANNEL_ID
 
 # Permission decorator
@@ -69,3 +74,23 @@ async def edit_signup_post(signup_post, new_content: str, interaction):
             "Updated in the database but couldn't edit the signup post. Check my permissions?",
             ephemeral=True
         )
+
+def sort_key(name: str) -> str:
+    """Generate an ASCII-only, lowercase key for consistent alphabetical sorting."""
+    normalized = unicodedata.normalize("NFKD", name)
+    ascii_only  = normalized.encode("ascii", "ignore").decode("ascii")
+    return ascii_only.lower()
+
+def get_sorted_display_names(
+    uids: Iterable[int], guild: Guild, key_func=sort_key
+) -> List[str]:
+    """
+    Given user IDs and a Guild, return escaped & alphabetically sorted
+    display names, normalizing special Unicode via sort_key.
+    """
+    names = []
+    for uid in uids:
+        member = guild.get_member(uid)
+        if member:
+            names.append(escape_markdown(member.display_name))
+    return sorted(names, key=key_func)

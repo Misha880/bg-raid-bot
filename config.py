@@ -24,12 +24,12 @@ RAID_TEMPLATES = {
 <:lightblueneonheart:1110338103496933497> **West Cannon Mob Puller:** 3️⃣
 
 💚 **NORTHEAST | GREEN BANNER** 💚
-❄️ **Divine Cabalist Support 1 (No Zap/No Monu):** 4️⃣
+❄️ **Divine Cabalist Support 1 (Taweret/Anubis):** 4️⃣
 🧠 **Oblongata -yth 2:** 5️⃣
 <:lightblueneonheart:1110338103496933497> **East Cannon Mob Puller:** 6️⃣
 
 💙 **SOUTHWEST | BLUE BANNER** 💙
-❄️ **Divine Cabalist Storm 2 (No Zap/No Monu):** 7️⃣
+❄️ **Divine Cabalist Storm 2 (Taweret/Anubis):** 7️⃣
 ☃️ **Poison Oak 1:** 8️⃣
 <:lightblueneonheart:1110338103496933497> **West Cannon Shooter 1:** 9️⃣
 

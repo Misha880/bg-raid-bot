@@ -197,9 +197,9 @@ SIGNUP_MAPPINGS = {
             "9️⃣": "**Southwest: West Cannon Shooter 1**",
             "🇦": "**Southeast: Personal Daemon -yth/Support 1**",
             "🇧": "**Southeast: Poison Oak 2**",
-            "🇨": "**Southeast: West Cannon Shooter 2**"
-        },
-        "backup": "↪️"
+            "🇨": "**Southeast: West Cannon Shooter 2**",
+            "↪️": "**Backups**"
+        }
     },
     "Crying Sky (Gatekeeper of the Apocalypse)": {
         "roles": {
@@ -214,9 +214,9 @@ SIGNUP_MAPPINGS = {
             "🇦": "**Cameca Team: -yth 1 (Preferably Ice)**",
             "🇧": "**Cameca Team: -yth 2 (Preferably Death)**",
             "🇨": "**Cameca Team: Fyth/Styth 3**",
-            "🇩": "**Cameca Team: Fyth/Styth 4**"
+            "🇩": "**Cameca Team: Fyth/Styth 4**",
+            "↪️": "**Backups**"
         },
-        "backup": "↪️"
     },
     "Crying Sky": {
         "roles": {
@@ -231,9 +231,9 @@ SIGNUP_MAPPINGS = {
             "🇦": "**Cameca Team: -yth 1**",
             "🇧": "**Cameca Team: -yth 2**",
             "🇨": "**Cameca Team: Fyth/Styth 3**",
-            "🇩": "**Cameca Team: Fyth/Styth 4**"
-        },
-        "backup": "↪️"
+            "🇩": "**Cameca Team: Fyth/Styth 4**",
+            "↪️": "**Backups**"
+        }
     },
     "Voracious Void": {
         "roles": {
@@ -248,9 +248,9 @@ SIGNUP_MAPPINGS = {
             "🇦": "**Drums: Close/Lead**",
             "🇧": "**Drums: Mid**",
             "🇨": "**Drums: Far**",
-            "🇩": "**Pet Token/Mob Pull**"
-        },
-        "backup": "↪️"
+            "🇩": "**Pet Token/Mob Pull**",
+            "↪️": "**Backups**"
+        }
     },
     "Poison Oak Only": {
         "roles": {
@@ -265,8 +265,8 @@ SIGNUP_MAPPINGS = {
             "9️⃣": "**Southwest: Fire Tree Hitter**",
             "🇦": "**Southeast: Poison Oak Storm Hitter 4**",
             "🇧": "**Southeast: Life Tree Support**",
-            "🇨": "**Southeast: Life Tree Hitter**"
-        },
-        "backup": "↪️"
+            "🇨": "**Southeast: Life Tree Hitter**",
+            "↪️": "**Backups**"
+        }
     }
 }

@@ -530,54 +530,27 @@ async def showsignups(interaction: Interaction):
     cache = signups_cache.get(raid_id, {})
     guild = interaction.guild or await bot.fetch_guild(interaction.guild_id)
 
-    # Assemble each line of the summary
-    lines: List[str] = []
-    lines.append(f"**{raid_name}**")
-    lines.append("\n__**Roles**__")
-    for emoji, role_desc in mapping["roles"].items():
-        members = get_sorted_display_names(cache.get(emoji, set()), guild) or ["None"]
-        lines.append(f"{emoji} {role_desc}**\n{', '.join(members)}")
-
-    # Backups section
-    backup_members = get_sorted_display_names(cache.get(mapping["backup"], set()), guild) or ["None"]
-    lines.append("")  # blank line for separation
-    lines.append("__**Backups**__")
-    lines.append(f"{mapping['backup']} {', '.join(backup_members)}")
-
-    # Full roster section
-    all_ids = set().union(*cache.values())
-    all_members = get_sorted_display_names(all_ids, guild) or ["None"]
-    lines.append("")  # blank line for separation
-    lines.append("__**Full Roster**__")
-    lines.append(f"{', '.join(all_members)}")
-
-    # Total count
-    lines.append("")  # blank line for separation
-    lines.append(f"**Number of Sign-ups:** {len(all_ids)}")
-
     # Build blocks so each section stays intact.
     blocks: List[str] = []
 
     # Title section
     blocks.append(f"**{raid_name}**")
 
-    # Roles section (merge into one block so no empty lines between)
+    # Roles section (merge into one block so no empty lines between; insert blank line before the backups entry)
     role_lines = ["__**Roles**__"]
     for emoji, role_desc in mapping["roles"].items():
+        if emoji == "↪️":
+            role_lines.append("")
         members = get_sorted_display_names(cache.get(emoji, set()), guild) or ["None"]
         role_lines.append(f"{emoji} {role_desc}\n {', '.join(members)}")
     blocks.append("\n".join(role_lines))
 
-    # Backups section
-    backup_members = get_sorted_display_names(cache.get(mapping["backup"], set()), guild) or ["None"]
-    blocks.append(f"__**Backups**__\n{mapping['backup']} {', '.join(backup_members)}")
-
     # Full roster section
-    all_members = get_sorted_display_names(all_ids, guild) or ["None"]
+    all_members = get_sorted_display_names(set().union(*cache.values()), guild) or ["None"]
     blocks.append(f"__**Full Roster**__\n{', '.join(all_members)}")
 
     # Total count section
-    blocks.append(f"**Number of Sign-ups:** {len(all_ids)}")
+    blocks.append(f"**Number of Sign-ups:** {len(all_members)}")
 
     # Send blocks in chunks under the 2000-character limit
     MAX_MESSAGE_LENGTH = 2000

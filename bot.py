@@ -1,6 +1,5 @@
 import asyncio, logging, os
 from datetime import datetime
-import io
 from typing import Dict, List, Set, Tuple
 
 import discord
@@ -11,7 +10,7 @@ import pytz
 
 from config import GUILD_MEMBER_PING, RAID_REACTIONS, RAID_TEMPLATES, SIGNUP_MAPPINGS, TIMEZONE_MAPPING, TEST_CHANNEL_ID
 from database import db
-from utils import permission_check ,get_ping_mention, validate_time_input, fetch_signup_post, edit_signup_post, sort_key, get_sorted_display_names
+from utils import permission_check ,get_ping_mention, validate_time_input, fetch_signup_post, edit_signup_post, get_sorted_display_names
 from views import CreateRaidFlow, CreateRaidView, UpdateRaidView
 
 # Setup logging
@@ -70,6 +69,8 @@ class RaidBot(commands.Bot):
             try:
                 # Fetch the original signup message
                 raid_message = await channel.fetch_message(raid_id)
+                # Store it back in the cache
+                active_raids[raid_id]["message"] = raid_message
 
                 # Build the reaction cache from the message’s existing reactions
                 cache: Dict[str, Set[int]] = {}
@@ -207,9 +208,18 @@ async def on_raw_reaction_remove(payload):
         # Keep cache in-sync on un-react
         if payload.message_id in active_raids:
             cache = signups_cache.get(payload.message_id, {})
-            cache.get(str(payload.emoji), set()).discard(payload.user_id)
+            cache.setdefault(str(payload.emoji), set()).discard(payload.user_id)
     except Exception:
         logger.exception("Error in on_raw_reaction_remove")
+
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: Exception):
+    logger.error(f"Error in `{interaction.command}` by {interaction.user}", exc_info=error)
+    if not interaction.response.is_done():
+        await interaction.response.send_message(
+            "Sorry, something went wrong. Please try again later.",
+            ephemeral=True
+        )
 
 class RaidSelect(Select):
     def __init__(self, raids: List[Tuple[int, str]], placeholder: str = "Select raid…"):
@@ -429,7 +439,7 @@ async def update_raid(interaction: Interaction):
             "name":      raid_name,
             "raid_type": flow.raid_type,
             "channel_id": channel_id,
-            "message":   active_raids.get(raid_id, {}).get("message")
+            "message":   old.get("message")
         }
     else:
         await db.execute("DELETE FROM active_raids WHERE raid_id = ?", (raid_id,))

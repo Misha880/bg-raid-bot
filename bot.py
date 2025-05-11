@@ -168,7 +168,6 @@ async def on_raw_reaction_add(payload):
 
     emoji = str(payload.emoji)
     allowed = set(RAID_REACTIONS[raid["raid_type"]])
-    allowed.add(SIGNUP_MAPPINGS[raid["raid_type"]]["backup"])
 
     if emoji not in allowed:
         # Dispatch a non-blocking prune task and return immediately
@@ -293,7 +292,6 @@ async def create_raid(interaction: Interaction, raid_name: str):
 
     # Add reactions sequentially while handling Discord's 20-reaction limit
     allowed = set(RAID_REACTIONS[flow.raid_type])
-    allowed.add(SIGNUP_MAPPINGS[flow.raid_type]["backup"])
 
     cache = signups_cache.get(signup_msg.id, {})
 

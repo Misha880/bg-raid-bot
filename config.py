@@ -54,7 +54,7 @@ https://docs.google.com/presentation/d/1ZrL9kliok42Qf_A7fHBUrIUpLKSSWFeYkNYXQGH0
 <:global:1218332456348946543><:global:1218332456348946543> **Support 1:** 1️⃣
 <:Balance:1059511860539433012><:Balance:1059511860539433012> **Balance 2:** 2️⃣
 <:Storm:1059511770785534062><:Storm:1059511770785534062> **Storm 3** 3️⃣
-<:global:1218332456348946543><:Storm:1059511770785534062> Storm/Form/Morm 4:** 4️⃣
+<:global:1218332456348946543><:Storm:1059511770785534062> **Storm/Form/Morm 4:** 4️⃣
 
 🔥 **YETAXA TEAM** 🔥
 <:global:1218332456348946543><:Fire:1059511748199186482> **Fire/Lire 1:** 5️⃣

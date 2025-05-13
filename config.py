@@ -119,7 +119,7 @@ https://docs.google.com/presentation/d/1ehNKtXakwFsyHIe-JIOjAPwP4Juk5gZchjVKX9hh
 ☄️ **OUTSIDE COMBAT** ☄️
 🧡 **Surge/Milli Support:** 5️⃣
 🩷 **Surge/Mob Pull:** 6️⃣
-💜 **Elf Jade/Milli Support:** 7️⃣
+💜 **Elf/Milli Support:** 7️⃣
 💚 **Off-School Elf/Milli Hitter:** 8️⃣
 
 🎶 **DRUMS & PET TOKEN** 🎶

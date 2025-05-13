@@ -538,38 +538,33 @@ async def showsignups(interaction: Interaction):
     cache = signups_cache.get(raid_id, {})
     guild = interaction.guild or await bot.fetch_guild(interaction.guild_id)
 
-    # Build blocks so each section stays intact.
+    # Build blocks so each section stays intact
     blocks: List[str] = []
 
-    # Title section
+    # Title
     blocks.append(f"**{raid_name}**")
 
-    # Roles section (merge into one block so no empty lines between; insert blank line before the backups entry)
-    role_lines = ["__**Roles**__"]
+    # Roles header
+    blocks.append("\n__**Roles**__")
+
+    # One block per role
     for emoji, role_desc in mapping["roles"].items():
         if emoji == "↪️":
-            role_lines.append("")
-        members = get_sorted_display_names(cache.get(emoji, set()), guild) or ["None"]
-        role_lines.append(f"{emoji} {role_desc}\n {', '.join(members)}")
-    blocks.append("\n".join(role_lines))
+            blocks.append("")  # blank line before backups
+        members    = get_sorted_display_names(cache.get(emoji, set()), guild) or ["None"]
+        member_list = ", ".join(members)
+        blocks.append(f"{emoji} {role_desc}\n{member_list}")
 
-    # Full roster section
+    # Full roster & count
     all_members = get_sorted_display_names(set().union(*cache.values()), guild) or ["None"]
-    blocks.append(f"__**Full Roster**__\n{', '.join(all_members)}")
+    blocks.append(f"\n__**Full Roster**__\n{', '.join(all_members)}")
+    blocks.append(f"\n**Number of Sign-ups:** {len(all_members)}")
 
-    # Total count section
-    blocks.append(f"**Number of Sign-ups:** {len(all_members)}")
-
-    # Send blocks in chunks under the 2000-character limit
+    # Flush loop
     MAX_MESSAGE_LENGTH = 2000
     buffer = ""
     for block in blocks:
-        # Add a single newline after each block
-        prefix = "\n" if buffer else ""
-        # Prepend a blank line before all but the first block
-        chunk = prefix + block + "\n"
-
-        # Flush the buffer if this block would exceed the limit
+        chunk = block + "\n"
         if len(buffer) + len(chunk) > MAX_MESSAGE_LENGTH:
             await interaction.followup.send(
                 buffer.rstrip(),
@@ -577,11 +572,8 @@ async def showsignups(interaction: Interaction):
                 allowed_mentions=discord.AllowedMentions.none()
             )
             buffer = ""
-
-        # Append the block to the buffer
         buffer += chunk
 
-    # Send any remaining content
     if buffer:
         await interaction.followup.send(
             buffer.rstrip(),
